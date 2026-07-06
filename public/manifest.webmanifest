@@ -1,0 +1,17 @@
+{
+  "name": "Vila Nova Subprodutos",
+  "short_name": "Subprodutos",
+  "description": "Registro offline de transporte e despejo de subprodutos.",
+  "start_url": "/app",
+  "display": "standalone",
+  "background_color": "#f6f4ed",
+  "theme_color": "#124734",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
