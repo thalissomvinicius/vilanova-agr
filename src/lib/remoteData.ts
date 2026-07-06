@@ -194,14 +194,14 @@ export async function loadRemoteDashboardData(user: DashboardUser) {
 
   try {
     const viewData = await loadFromView();
-    if (viewData && viewData.deposits.length > 0) return viewData;
+    if (viewData) return viewData;
   } catch {
     // The authenticated-RLS path is not always available when the dashboard uses matricula RPC sessions.
   }
 
   try {
     const rpcData = await loadFromDashboardRpc(user);
-    if (rpcData && rpcData.deposits.length > 0) return rpcData;
+    if (rpcData) return rpcData;
   } catch {
     return null;
   }

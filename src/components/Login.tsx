@@ -67,7 +67,7 @@ export function Login({ onLogin }: LoginProps) {
           <h1>Controle de viagens, despejos e materiais aplicados em campo.</h1>
           <p>
             Acesso operacional para acompanhar motoristas, caminhões, fazendas, parcelas, tickets de balança e
-            sincronizações do app de campo.
+            registros sincronizados do Supabase.
           </p>
         </div>
 

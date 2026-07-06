@@ -1853,8 +1853,8 @@ export function Dashboard({ deposits, scaleTickets }: DashboardProps) {
           <p className="eyebrow">Operacao e analise</p>
           <h1>Dashboard Subprodutos</h1>
           <div className="header-meta">
-            <span>Base demonstrativa</span>
-            <span>Campo + balanca</span>
+            <span>Base Supabase</span>
+            <span>Operação real</span>
             <span>Tomé-Açu / PA</span>
           </div>
         </div>

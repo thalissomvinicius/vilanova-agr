@@ -3,7 +3,6 @@ import { RefreshCw, BarChart3, LogOut, UserRound } from "lucide-react";
 import { Dashboard } from "../components/Dashboard";
 import { Login } from "../components/Login";
 import { logoutDashboardUser, refreshDashboardSession, type DashboardUser } from "../lib/auth";
-import { initializeLocalStore, listDeposits, listScaleTickets } from "../lib/localStore";
 import { loadRemoteDashboardData } from "../lib/remoteData";
 import type { FieldDeposit, ScaleTicket } from "../types";
 
@@ -12,14 +11,7 @@ export function DashboardApp() {
   const [deposits, setDeposits] = useState<FieldDeposit[]>([]);
   const [scaleTickets, setScaleTickets] = useState<ScaleTicket[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dataMode, setDataMode] = useState("Base demonstrativa");
-
-  const loadLocalDashboard = async () => {
-    const [nextDeposits, nextScaleTickets] = await Promise.all([listDeposits(), listScaleTickets()]);
-    setDeposits(nextDeposits);
-    setScaleTickets(nextScaleTickets);
-    setDataMode("Base demonstrativa");
-  };
+  const [dataMode, setDataMode] = useState("Aguardando Supabase");
 
   const refresh = useCallback(async (profile: DashboardUser) => {
     const remoteData = await loadRemoteDashboardData(profile);
@@ -31,14 +23,15 @@ export function DashboardApp() {
       return;
     }
 
-    await loadLocalDashboard();
+    setDeposits([]);
+    setScaleTickets([]);
+    setDataMode("Supabase sem registros");
   }, []);
 
   useEffect(() => {
     let mounted = true;
 
-    initializeLocalStore()
-      .then(refreshDashboardSession)
+    refreshDashboardSession()
       .then(async (profile) => {
         if (!mounted) return;
 

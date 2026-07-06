@@ -29,12 +29,11 @@ npm run dev
 
 Abra o endereco exibido pelo Vite no navegador.
 
-URLs principais:
+URL principal:
 
-- App de campo: `http://localhost:5174/app`
 - Dashboard: `http://localhost:5174/dashboard`
 
-O app de campo e o dashboard usam rotas e bundles separados. O motorista nao baixa o codigo dos graficos do dashboard ao abrir `/app`.
+No deploy atual, a raiz `/` tambem abre o dashboard.
 
 ## Configurar Supabase
 
