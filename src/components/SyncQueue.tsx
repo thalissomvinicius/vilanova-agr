@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Database, LogIn, LogOut, RefreshCw, SendHorizonal, Wifi, WifiOff } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { formatDateTime } from "../lib/format";
-import { getCurrentSession, supabase, supabaseConfigured } from "../lib/supabase";
+import { getCurrentSession, supabase, supabaseAuthEmailFromLogin, supabaseConfigured } from "../lib/supabase";
 import { syncPendingDeposits } from "../lib/sync";
 import type { FieldDeposit } from "../types";
 import { StatusPill } from "./StatusPill";
@@ -15,7 +15,7 @@ interface SyncQueueProps {
 
 export function SyncQueue({ deposits, online, onSynced }: SyncQueueProps) {
   const [session, setSession] = useState<Session | null>(null);
-  const [email, setEmail] = useState("");
+  const [matricula, setMatricula] = useState("");
   const [password, setPassword] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
@@ -54,7 +54,7 @@ export function SyncQueue({ deposits, online, onSynced }: SyncQueueProps) {
     setMessage("");
 
     const { error } = await supabase.auth.signInWithPassword({
-      email,
+      email: supabaseAuthEmailFromLogin(matricula),
       password,
     });
 
@@ -134,12 +134,13 @@ export function SyncQueue({ deposits, online, onSynced }: SyncQueueProps) {
           ) : (
             <form className="auth-form" onSubmit={signIn}>
               <label>
-                E-mail
+                Matrícula
                 <input
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="usuario@empresa.com"
+                  value={matricula}
+                  onChange={(event) => setMatricula(event.target.value)}
+                  inputMode="numeric"
+                  autoComplete="username"
+                  placeholder="Ex: 2170"
                   required
                 />
               </label>

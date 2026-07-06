@@ -47,9 +47,17 @@ O app de campo e o dashboard usam rotas e bundles separados. O motorista nao bai
 ```bash
 VITE_SUPABASE_URL=https://seu-projeto.supabase.co
 VITE_SUPABASE_ANON_KEY=sua-chave-anonima
+VITE_SUPABASE_AUTH_EMAIL_DOMAIN=vilanova.local
 ```
 
 6. Reinicie `npm run dev`.
+
+No deploy da Vercel, cadastre as mesmas variaveis em Project Settings > Environment Variables.
+
+O dashboard aceita dois caminhos de acesso:
+
+- Matricula/senha via RPC `dashboard_authenticate`, igual ao dashboard CQO antigo. Para esse modo tambem ler os dados de subprodutos por token de sessao, execute `supabase/dashboard_subprodutos_rpc.sql` depois do SQL de seguranca do dashboard antigo.
+- Supabase Auth nativo como fallback. Nesse caso a matricula vira e-mail no formato `matricula@VITE_SUPABASE_AUTH_EMAIL_DOMAIN`, e o usuario precisa existir em Authentication.
 
 ## Fluxo operacional
 
