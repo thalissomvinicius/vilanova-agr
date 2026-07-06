@@ -20,6 +20,7 @@ import {
 import {
   AlertTriangle,
   BarChart3,
+  CheckCircle2,
   ClipboardCheck,
   ClipboardList,
   Clock3,
@@ -39,17 +40,20 @@ import {
   Truck,
   WifiOff,
   X,
+  XCircle,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
 import { formatDate, formatMinutes, formatTonnes } from "../lib/format";
 import { findFleetVehicleByPlate } from "../lib/fleet";
 import farmParcelsGeoJson from "../data/farm-parcels.json";
-import type { DashboardSummary, FieldDeposit, ScaleTicket, SyncStatus } from "../types";
+import type { DashboardSummary, FieldDeposit, ReviewStatus, ScaleTicket, SyncStatus } from "../types";
 
 interface DashboardProps {
   deposits: FieldDeposit[];
   scaleTickets: ScaleTicket[];
+  onReviewDeposit?: (depositId: string, status: ReviewStatus) => Promise<void>;
+  reviewBusyDepositId?: string | null;
 }
 
 interface TicketMaps {
@@ -1366,6 +1370,20 @@ function syncLabel(status: SyncStatus) {
   return "Pendente";
 }
 
+function getReviewStatus(deposit: FieldDeposit): ReviewStatus {
+  return deposit.reviewStatus ?? "pending";
+}
+
+function reviewLabel(status: ReviewStatus) {
+  if (status === "approved") return "Aprovada";
+  if (status === "rejected") return "Reprovada";
+  return "Recebida";
+}
+
+function isApprovedDeposit(deposit: FieldDeposit) {
+  return getReviewStatus(deposit) === "approved";
+}
+
 function escapeCsv(value: string | number | null | undefined) {
   const text = String(value ?? "");
   return `"${text.replace(/"/g, '""')}"`;
@@ -1384,6 +1402,7 @@ function exportCsv(deposits: FieldDeposit[], ticketMaps: TicketMaps) {
       "Fazenda",
       "Parcela",
       "Subproduto",
+      "Validacao",
       "Peso liquido",
       "Ciclo balanca",
       "GPS",
@@ -1404,6 +1423,7 @@ function exportCsv(deposits: FieldDeposit[], ticketMaps: TicketMaps) {
         deposit.farm,
         formatPlot(deposit),
         deposit.subproduct,
+        reviewLabel(getReviewStatus(deposit)),
         ticket ? formatTonnes(ticket.netWeightKg) : "",
         ticket ? formatMinutes(getCycleMinutes(ticket)) : "",
         deposit.latitude && deposit.longitude ? `${deposit.latitude}, ${deposit.longitude}` : "",
@@ -1425,7 +1445,12 @@ function exportCsv(deposits: FieldDeposit[], ticketMaps: TicketMaps) {
   URL.revokeObjectURL(url);
 }
 
-export function Dashboard({ deposits, scaleTickets }: DashboardProps) {
+export function Dashboard({
+  deposits,
+  scaleTickets,
+  onReviewDeposit,
+  reviewBusyDepositId,
+}: DashboardProps) {
   const [activeView, setActiveView] = useState<DashboardView>("geral");
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const [selectedDepositId, setSelectedDepositId] = useState<string | null>(null);
@@ -1436,6 +1461,7 @@ export function Dashboard({ deposits, scaleTickets }: DashboardProps) {
   const [selectedParcel, setSelectedParcel] = useState<SelectedParcel | null>(null);
   const [farmMapViews, setFarmMapViews] = useState<Record<FarmId, FarmMapViewState>>(initialFarmMapViews);
   const [draggingMap, setDraggingMap] = useState<MapDragState | null>(null);
+  const [reviewError, setReviewError] = useState("");
 
   const ticketMaps = useMemo(() => buildTicketMaps(scaleTickets), [scaleTickets]);
   const scopedDeposits = useMemo(
@@ -1477,13 +1503,23 @@ export function Dashboard({ deposits, scaleTickets }: DashboardProps) {
     () => groupFarmPerformance(filteredDeposits, ticketMaps),
     [filteredDeposits, ticketMaps],
   );
+  const approvedFilteredDeposits = useMemo(
+    () => filteredDeposits.filter(isApprovedDeposit),
+    [filteredDeposits],
+  );
+  const reviewSummary = useMemo(() => ({
+    received: filteredDeposits.length,
+    pending: filteredDeposits.filter((deposit) => getReviewStatus(deposit) === "pending").length,
+    approved: approvedFilteredDeposits.length,
+    rejected: filteredDeposits.filter((deposit) => getReviewStatus(deposit) === "rejected").length,
+  }), [approvedFilteredDeposits.length, filteredDeposits]);
   const analysisBaseDeposits = useMemo(
     () => (
       selectedAnalysisSubproduct
-        ? filteredDeposits.filter((deposit) => deposit.subproduct === selectedAnalysisSubproduct)
-        : filteredDeposits
+        ? approvedFilteredDeposits.filter((deposit) => deposit.subproduct === selectedAnalysisSubproduct)
+        : approvedFilteredDeposits
     ),
-    [filteredDeposits, selectedAnalysisSubproduct],
+    [approvedFilteredDeposits, selectedAnalysisSubproduct],
   );
   const analysisFarmDeposits = useMemo(
     () => (
@@ -1585,11 +1621,17 @@ export function Dashboard({ deposits, scaleTickets }: DashboardProps) {
     () => filteredDeposits.filter((deposit) => !getTicketForDeposit(deposit, ticketMaps)),
     [filteredDeposits, ticketMaps],
   );
+  const pendingReviewDeposits = useMemo(
+    () => filteredDeposits.filter((deposit) => getReviewStatus(deposit) === "pending"),
+    [filteredDeposits],
+  );
   const selectedDeposit = useMemo(
     () => filteredDeposits.find((deposit) => deposit.id === selectedDepositId) ?? filteredDeposits[0] ?? null,
     [filteredDeposits, selectedDepositId],
   );
   const selectedTicket = selectedDeposit ? getTicketForDeposit(selectedDeposit, ticketMaps) : null;
+  const selectedReviewStatus = selectedDeposit ? getReviewStatus(selectedDeposit) : "pending";
+  const isReviewBusy = Boolean(selectedDeposit && reviewBusyDepositId === selectedDeposit.id);
   const hasFilters = Object.entries(filters).some(([key, value]) => (
     key === "ticketStatus" || key === "syncStatus" ? value !== "all" : Boolean(value)
   ));
@@ -1660,6 +1702,18 @@ export function Dashboard({ deposits, scaleTickets }: DashboardProps) {
     setSelectedDriverKey(null);
     setSelectedParcel(null);
     setSelectedDepositId(null);
+  };
+
+  const reviewSelectedDeposit = async (status: ReviewStatus) => {
+    if (!selectedDeposit || !onReviewDeposit) return;
+
+    setReviewError("");
+
+    try {
+      await onReviewDeposit(selectedDeposit.id, status);
+    } catch (error) {
+      setReviewError(error instanceof Error ? error.message : "Nao foi possivel atualizar a validacao.");
+    }
   };
 
   const updateFarmMapView = (
@@ -2253,13 +2307,31 @@ export function Dashboard({ deposits, scaleTickets }: DashboardProps) {
               <header>
                 <span className="panel-kicker">
                   <ListChecks aria-hidden="true" />
-                  Operacao
+                  Validacao
                 </span>
-                <h2>Coletas aguardando ticket</h2>
+                <h2>Coletas aguardando validação</h2>
               </header>
+              <div className="compact-stat-grid compact-stat-grid-4 review-stat-grid">
+                <div>
+                  <span>Recebidas</span>
+                  <strong>{reviewSummary.received}</strong>
+                </div>
+                <div>
+                  <span>Aprovadas</span>
+                  <strong>{reviewSummary.approved}</strong>
+                </div>
+                <div>
+                  <span>Aguardando</span>
+                  <strong>{reviewSummary.pending}</strong>
+                </div>
+                <div>
+                  <span>Reprovadas</span>
+                  <strong>{reviewSummary.rejected}</strong>
+                </div>
+              </div>
               <div className="pending-list">
-                {pendingDeposits.length > 0 ? (
-                  pendingDeposits.slice(0, 6).map((deposit) => (
+                {pendingReviewDeposits.length > 0 ? (
+                  pendingReviewDeposits.slice(0, 6).map((deposit) => (
                     <button
                       type="button"
                       className="pending-item pending-button"
@@ -2272,11 +2344,13 @@ export function Dashboard({ deposits, scaleTickets }: DashboardProps) {
                           {deposit.farm} · {formatPlot(deposit)} · {getLoadingOrigin(deposit)}
                         </span>
                       </div>
-                      <span className="reconcile-pill reconcile-pending">Aguardando</span>
+                      <span className={`mini-chip review-${getReviewStatus(deposit)}`}>
+                        {reviewLabel(getReviewStatus(deposit))}
+                      </span>
                     </button>
                   ))
                 ) : (
-                  <div className="empty-inline">Nenhuma coleta aguardando ticket nesta selecao.</div>
+                  <div className="empty-inline">Nenhuma coleta aguardando validação nesta seleção.</div>
                 )}
               </div>
             </article>
@@ -2340,6 +2414,43 @@ export function Dashboard({ deposits, scaleTickets }: DashboardProps) {
                           : "Nao anexada"}
                       </strong>
                     </div>
+                    <div>
+                      <span>Validação</span>
+                      <strong>{reviewLabel(selectedReviewStatus)}</strong>
+                    </div>
+                    <div>
+                      <span>Validado por</span>
+                      <strong>{selectedDeposit.reviewedByLabel || "-"}</strong>
+                    </div>
+                  </div>
+                  <div className="review-action-panel">
+                    <div>
+                      <strong>Validação da coleta</strong>
+                      <span>
+                        Apenas coletas aprovadas entram nos gráficos da aba Análise.
+                      </span>
+                      {reviewError ? <em>{reviewError}</em> : null}
+                    </div>
+                    <div className="review-actions">
+                      <button
+                        type="button"
+                        className="review-action approve"
+                        disabled={!onReviewDeposit || isReviewBusy || selectedReviewStatus === "approved"}
+                        onClick={() => reviewSelectedDeposit("approved")}
+                      >
+                        <CheckCircle2 aria-hidden="true" />
+                        Aprovar
+                      </button>
+                      <button
+                        type="button"
+                        className="review-action reject"
+                        disabled={!onReviewDeposit || isReviewBusy || selectedReviewStatus === "rejected"}
+                        onClick={() => reviewSelectedDeposit("rejected")}
+                      >
+                        <XCircle aria-hidden="true" />
+                        Reprovar
+                      </button>
+                    </div>
                   </div>
                   {selectedDeposit.dumpPhotoDataUrl ? (
                     <img
@@ -2359,7 +2470,7 @@ export function Dashboard({ deposits, scaleTickets }: DashboardProps) {
             <header>
               <div>
                 <h2>Coletas de campo</h2>
-                <span className="table-caption">Registros filtrados com situacao de balanca, GPS e sync</span>
+                <span className="table-caption">Registros recebidos do app, com validação para liberar a análise</span>
               </div>
             </header>
             <div className="table-scroll">
@@ -2376,6 +2487,7 @@ export function Dashboard({ deposits, scaleTickets }: DashboardProps) {
                     <th>Subproduto</th>
                     <th>Balanca</th>
                     <th>GPS</th>
+                    <th>Validação</th>
                     <th>Sync</th>
                     <th>Detalhe</th>
                   </tr>
@@ -2411,6 +2523,11 @@ export function Dashboard({ deposits, scaleTickets }: DashboardProps) {
                             </span>
                           </td>
                           <td>
+                            <span className={`mini-chip review-${getReviewStatus(deposit)}`}>
+                              {reviewLabel(getReviewStatus(deposit))}
+                            </span>
+                          </td>
+                          <td>
                             <span className={`mini-chip sync-${deposit.syncStatus}`}>
                               {syncLabel(deposit.syncStatus)}
                             </span>
@@ -2429,7 +2546,7 @@ export function Dashboard({ deposits, scaleTickets }: DashboardProps) {
                     })
                   ) : (
                     <tr>
-                      <td className="empty-table-cell" colSpan={12}>
+                      <td className="empty-table-cell" colSpan={13}>
                         Nenhum registro encontrado para os filtros selecionados.
                       </td>
                     </tr>

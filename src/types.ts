@@ -1,5 +1,7 @@
 export type SyncStatus = "pending" | "syncing" | "synced" | "error";
 
+export type ReviewStatus = "pending" | "approved" | "rejected";
+
 export type PlacementMode = "single_plot" | "between_plots";
 
 export type Subproduct =
@@ -42,6 +44,10 @@ export interface FieldDeposit {
   syncStatus: SyncStatus;
   syncError: string | null;
   syncedAt: string | null;
+  reviewStatus?: ReviewStatus;
+  reviewNotes?: string | null;
+  reviewedAt?: string | null;
+  reviewedByLabel?: string | null;
   demoRecord?: boolean;
 }
 

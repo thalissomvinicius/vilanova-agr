@@ -1,6 +1,6 @@
 import { supabase, supabaseConfigured } from "./supabase";
 import type { DashboardUser } from "./auth";
-import type { FieldDeposit, LoadingOrigin, PlacementMode, ScaleTicket, Subproduct } from "../types";
+import type { FieldDeposit, LoadingOrigin, PlacementMode, ReviewStatus, ScaleTicket, Subproduct } from "../types";
 
 interface RemoteDashboardData {
   deposits: FieldDeposit[];
@@ -57,6 +57,12 @@ function normalizeOrigin(value: unknown): LoadingOrigin {
   return (text(value, "Extratora") || "Extratora") as LoadingOrigin;
 }
 
+function normalizeReviewStatus(value: unknown): ReviewStatus {
+  const status = text(value, "pending");
+  if (status === "approved" || status === "rejected") return status;
+  return "pending";
+}
+
 function mapDeposit(row: RemoteRow): FieldDeposit {
   const depositDate = dateValue(row.deposit_date);
   const depositTime = timeValue(row.deposit_time);
@@ -93,6 +99,10 @@ function mapDeposit(row: RemoteRow): FieldDeposit {
     syncStatus: "synced",
     syncError: null,
     syncedAt: isoDateTime(row.client_synced_at || row.updated_at || row.created_at, depositDate, depositTime),
+    reviewStatus: normalizeReviewStatus(row.review_status),
+    reviewNotes: text(row.review_notes) || null,
+    reviewedAt: text(row.reviewed_at) || null,
+    reviewedByLabel: text(row.reviewed_by_label) || null,
   };
 }
 

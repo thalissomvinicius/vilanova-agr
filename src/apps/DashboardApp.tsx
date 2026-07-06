@@ -4,7 +4,8 @@ import { Dashboard } from "../components/Dashboard";
 import { Login } from "../components/Login";
 import { logoutDashboardUser, refreshDashboardSession, type DashboardUser } from "../lib/auth";
 import { loadRemoteDashboardData } from "../lib/remoteData";
-import type { FieldDeposit, ScaleTicket } from "../types";
+import { reviewFieldDeposit } from "../lib/review";
+import type { FieldDeposit, ReviewStatus, ScaleTicket } from "../types";
 
 export function DashboardApp() {
   const [user, setUser] = useState<DashboardUser | null>(null);
@@ -12,6 +13,7 @@ export function DashboardApp() {
   const [scaleTickets, setScaleTickets] = useState<ScaleTicket[]>([]);
   const [loading, setLoading] = useState(true);
   const [dataMode, setDataMode] = useState("Aguardando Supabase");
+  const [reviewBusyDepositId, setReviewBusyDepositId] = useState<string | null>(null);
 
   const refresh = useCallback(async (profile: DashboardUser) => {
     const remoteData = await loadRemoteDashboardData(profile);
@@ -68,6 +70,30 @@ export function DashboardApp() {
     setLoading(false);
   };
 
+  const handleReviewDeposit = async (depositId: string, status: ReviewStatus) => {
+    if (!user) return;
+
+    setReviewBusyDepositId(depositId);
+
+    try {
+      const result = await reviewFieldDeposit(user, depositId, status);
+      setDeposits((current) => current.map((deposit) => (
+        deposit.id === depositId
+          ? {
+              ...deposit,
+              reviewStatus: result.reviewStatus,
+              reviewNotes: result.reviewNotes,
+              reviewedAt: result.reviewedAt,
+              reviewedByLabel: result.reviewedByLabel,
+            }
+          : deposit
+      )));
+      await refresh(user);
+    } finally {
+      setReviewBusyDepositId(null);
+    }
+  };
+
   if (!user && !loading) {
     return <Login onLogin={handleLogin} />;
   }
@@ -117,7 +143,14 @@ export function DashboardApp() {
           </div>
         ) : null}
 
-        {!loading ? <Dashboard deposits={deposits} scaleTickets={scaleTickets} /> : null}
+        {!loading ? (
+          <Dashboard
+            deposits={deposits}
+            scaleTickets={scaleTickets}
+            onReviewDeposit={handleReviewDeposit}
+            reviewBusyDepositId={reviewBusyDepositId}
+          />
+        ) : null}
       </section>
     </main>
   );

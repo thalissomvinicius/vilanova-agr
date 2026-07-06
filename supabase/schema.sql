@@ -24,6 +24,11 @@ create table if not exists public.field_deposits (
   dump_photo_accuracy numeric,
   dump_photo_captured_at timestamptz,
   notes text,
+  review_status text not null default 'pending' check (review_status in ('pending', 'approved', 'rejected')),
+  review_notes text,
+  reviewed_at timestamptz,
+  reviewed_by uuid references auth.users(id),
+  reviewed_by_label text,
   created_at timestamptz not null,
   updated_at timestamptz not null,
   client_synced_at timestamptz,
@@ -71,10 +76,33 @@ alter table public.field_deposits
   add column if not exists dump_photo_accuracy numeric,
   add column if not exists dump_photo_captured_at timestamptz;
 
+alter table public.field_deposits
+  add column if not exists review_status text not null default 'pending',
+  add column if not exists review_notes text,
+  add column if not exists reviewed_at timestamptz,
+  add column if not exists reviewed_by uuid references auth.users(id),
+  add column if not exists reviewed_by_label text;
+
+update public.field_deposits
+set review_status = 'pending'
+where review_status is null;
+
+alter table public.field_deposits
+  alter column review_status set default 'pending',
+  alter column review_status set not null;
+
+alter table public.field_deposits
+  drop constraint if exists field_deposits_review_status_check;
+
+alter table public.field_deposits
+  add constraint field_deposits_review_status_check
+  check (review_status in ('pending', 'approved', 'rejected'));
+
 create index if not exists field_deposits_date_idx on public.field_deposits (deposit_date desc);
 create index if not exists field_deposits_vehicle_idx on public.field_deposits (vehicle_plate);
 create index if not exists field_deposits_farm_idx on public.field_deposits (farm);
 create index if not exists field_deposits_ticket_idx on public.field_deposits (scale_ticket_code);
+create index if not exists field_deposits_review_status_idx on public.field_deposits (review_status);
 create index if not exists inventario_parcelas_farm_idx on public.inventario_parcelas (nome_fazenda, ativo);
 create index if not exists scale_tickets_ticket_idx on public.scale_tickets (ticket_code);
 create index if not exists scale_tickets_vehicle_idx on public.scale_tickets (vehicle_plate);
@@ -86,6 +114,7 @@ alter table public.scale_tickets enable row level security;
 
 drop policy if exists "authenticated users can insert field deposits" on public.field_deposits;
 drop policy if exists "authenticated users can update own field deposits" on public.field_deposits;
+drop policy if exists "authenticated users can review field deposits" on public.field_deposits;
 drop policy if exists "authenticated users can read field deposits" on public.field_deposits;
 drop policy if exists "authenticated users can read inventory parcels" on public.inventario_parcelas;
 drop policy if exists "authenticated users can read scale tickets" on public.scale_tickets;
@@ -102,6 +131,13 @@ for update
 to authenticated
 using (created_by = auth.uid())
 with check (created_by = auth.uid());
+
+create policy "authenticated users can review field deposits"
+on public.field_deposits
+for update
+to authenticated
+using (true)
+with check (true);
 
 create policy "authenticated users can read field deposits"
 on public.field_deposits
@@ -150,6 +186,11 @@ select
   fd.dump_photo_accuracy,
   fd.dump_photo_captured_at,
   fd.notes,
+  fd.review_status,
+  fd.review_notes,
+  fd.reviewed_at,
+  fd.reviewed_by,
+  fd.reviewed_by_label,
   fd.created_at,
   fd.updated_at,
   fd.client_synced_at,
