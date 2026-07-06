@@ -1,4 +1,5 @@
 import {
+  type FormEvent as ReactFormEvent,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
   useMemo,
@@ -32,11 +33,14 @@ import {
   ListChecks,
   MapPinned,
   Minimize2,
+  Pencil,
   Presentation,
   RotateCcw,
+  Save,
   Search,
   Scale,
   TicketCheck,
+  Trash2,
   Truck,
   WifiOff,
   X,
@@ -47,13 +51,17 @@ import {
 import { formatDate, formatMinutes, formatTonnes } from "../lib/format";
 import { findFleetVehicleByPlate } from "../lib/fleet";
 import farmParcelsGeoJson from "../data/farm-parcels.json";
-import type { DashboardSummary, FieldDeposit, ReviewStatus, ScaleTicket, SyncStatus } from "../types";
+import type { DashboardSummary, FieldDeposit, FieldDepositEditValues, ReviewStatus, ScaleTicket, SyncStatus } from "../types";
 
 interface DashboardProps {
   deposits: FieldDeposit[];
   scaleTickets: ScaleTicket[];
   onReviewDeposit?: (depositId: string, status: ReviewStatus) => Promise<void>;
+  onDeleteDeposit?: (depositId: string) => Promise<void>;
+  onUpdateDeposit?: (depositId: string, values: FieldDepositEditValues) => Promise<void>;
   reviewBusyDepositId?: string | null;
+  deleteBusyDepositId?: string | null;
+  updateBusyDepositId?: string | null;
 }
 
 interface TicketMaps {
@@ -245,6 +253,8 @@ interface VehicleControlItem {
 
 const chartColors = ["#1e5c3a", "#2f6f9f", "#e2a02c", "#e8551f", "#3a9b50", "#86c53c"];
 const reconciliationColors = ["#1e5c3a", "#e2a02c", "#e8551f"];
+const subproductChoices = ["Borra", "Cacho Vazio (Bucha)", "Cacho Triturado", "Cinza", "Torta", "Outros"];
+const loadingOriginChoices = ["Extratora", "Patio", "Outras"];
 const subproductMapColors = new Map([
   ["Borra", "#1e5c3a"],
   ["Cacho Vazio (Bucha)", "#2f6f9f"],
@@ -469,9 +479,10 @@ function normalizeParcelCode(value: string) {
 
 function getFocusFarmId(farmName: string): FarmId | null {
   const normalized = normalizeText(farmName);
+  const compact = normalized.replace(/[^A-Z0-9]/g, "");
 
-  if (normalized === "VILA NOVA") return "vila-nova";
-  if (normalized === "FE EM DEUS") return "fe-em-deus";
+  if (normalized.includes("VILA NOVA") || compact.includes("VILANOVA")) return "vila-nova";
+  if (normalized.includes("FE EM DEUS") || compact.includes("FEEMDEUS")) return "fe-em-deus";
   return null;
 }
 
@@ -1278,6 +1289,56 @@ function formatPlot(deposit: FieldDeposit) {
   return deposit.plotPrimary;
 }
 
+function editValuesFromDeposit(deposit: FieldDeposit): FieldDepositEditValues {
+  return {
+    driverRegistration: deposit.driverRegistration,
+    driverName: deposit.driverName,
+    vehiclePlate: deposit.vehiclePlate,
+    subproduct: deposit.subproduct,
+    loadingOrigin: getLoadingOrigin(deposit),
+    scaleTicketCode: deposit.scaleTicketCode,
+    farm: deposit.farm,
+    placementMode: deposit.placementMode,
+    plotPrimary: deposit.plotPrimary,
+    plotSecondary: deposit.plotSecondary,
+    depositDate: deposit.depositDate,
+    depositTime: deposit.depositTime,
+    latitude: deposit.latitude,
+    longitude: deposit.longitude,
+    locationAccuracy: deposit.locationAccuracy,
+    notes: deposit.notes,
+  };
+}
+
+function parseOptionalNumber(value: string) {
+  const trimmed = value.trim().replace(",", ".");
+  if (!trimmed) return null;
+
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function requiredEditFields(values: FieldDepositEditValues) {
+  const required = [
+    values.driverRegistration,
+    values.driverName,
+    values.vehiclePlate,
+    values.subproduct,
+    values.loadingOrigin,
+    values.scaleTicketCode,
+    values.farm,
+    values.plotPrimary,
+    values.depositDate,
+    values.depositTime,
+  ];
+
+  if (values.placementMode === "between_plots") {
+    required.push(values.plotSecondary);
+  }
+
+  return required.every((value) => String(value || "").trim());
+}
+
 function formatCompactTonnes(value: number) {
   return `${value.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} t`;
 }
@@ -1449,7 +1510,11 @@ export function Dashboard({
   deposits,
   scaleTickets,
   onReviewDeposit,
+  onDeleteDeposit,
+  onUpdateDeposit,
   reviewBusyDepositId,
+  deleteBusyDepositId,
+  updateBusyDepositId,
 }: DashboardProps) {
   const [activeView, setActiveView] = useState<DashboardView>("geral");
   const [filters, setFilters] = useState<Filters>(initialFilters);
@@ -1462,6 +1527,11 @@ export function Dashboard({
   const [farmMapViews, setFarmMapViews] = useState<Record<FarmId, FarmMapViewState>>(initialFarmMapViews);
   const [draggingMap, setDraggingMap] = useState<MapDragState | null>(null);
   const [reviewError, setReviewError] = useState("");
+  const [selectedReviewIds, setSelectedReviewIds] = useState<Set<string>>(() => new Set());
+  const [reviewBulkAction, setReviewBulkAction] = useState<ReviewStatus | "delete" | null>(null);
+  const [editDepositId, setEditDepositId] = useState<string | null>(null);
+  const [editValues, setEditValues] = useState<FieldDepositEditValues | null>(null);
+  const [editError, setEditError] = useState("");
 
   const ticketMaps = useMemo(() => buildTicketMaps(scaleTickets), [scaleTickets]);
   const scopedDeposits = useMemo(
@@ -1621,9 +1691,13 @@ export function Dashboard({
     () => filteredDeposits.filter((deposit) => !getTicketForDeposit(deposit, ticketMaps)),
     [filteredDeposits, ticketMaps],
   );
-  const pendingReviewDeposits = useMemo(
-    () => filteredDeposits.filter((deposit) => getReviewStatus(deposit) === "pending"),
+  const reviewQueueDeposits = useMemo(
+    () => filteredDeposits.filter((deposit) => getReviewStatus(deposit) !== "approved"),
     [filteredDeposits],
+  );
+  const selectedReviewDeposits = useMemo(
+    () => reviewQueueDeposits.filter((deposit) => selectedReviewIds.has(deposit.id)),
+    [reviewQueueDeposits, selectedReviewIds],
   );
   const selectedDeposit = useMemo(
     () => filteredDeposits.find((deposit) => deposit.id === selectedDepositId) ?? filteredDeposits[0] ?? null,
@@ -1632,6 +1706,20 @@ export function Dashboard({
   const selectedTicket = selectedDeposit ? getTicketForDeposit(selectedDeposit, ticketMaps) : null;
   const selectedReviewStatus = selectedDeposit ? getReviewStatus(selectedDeposit) : "pending";
   const isReviewBusy = Boolean(selectedDeposit && reviewBusyDepositId === selectedDeposit.id);
+  const isDeleteBusy = Boolean(selectedDeposit && deleteBusyDepositId === selectedDeposit.id);
+  const isUpdateBusy = Boolean(editDepositId && updateBusyDepositId === editDepositId);
+  const selectedReviewCount = selectedReviewDeposits.length;
+  const allReviewRowsSelected = reviewQueueDeposits.length > 0
+    && selectedReviewCount === reviewQueueDeposits.length;
+  const selectedRejectedCount = selectedReviewDeposits.filter((deposit) => (
+    getReviewStatus(deposit) === "rejected"
+  )).length;
+  const canDeleteSelectedReviews = Boolean(
+    onDeleteDeposit
+      && selectedReviewCount > 0
+      && selectedRejectedCount === selectedReviewCount,
+  );
+  const isBulkBusy = Boolean(reviewBulkAction);
   const hasFilters = Object.entries(filters).some(([key, value]) => (
     key === "ticketStatus" || key === "syncStatus" ? value !== "all" : Boolean(value)
   ));
@@ -1713,6 +1801,145 @@ export function Dashboard({
       await onReviewDeposit(selectedDeposit.id, status);
     } catch (error) {
       setReviewError(error instanceof Error ? error.message : "Nao foi possivel atualizar a validacao.");
+    }
+  };
+
+  const deleteSelectedDeposit = async () => {
+    if (!selectedDeposit || !onDeleteDeposit || selectedReviewStatus !== "rejected") return;
+
+    const confirmed = window.confirm("Tem certeza que deseja excluir esta coleta reprovada?");
+    if (!confirmed) return;
+
+    setReviewError("");
+
+    try {
+      await onDeleteDeposit(selectedDeposit.id);
+      setSelectedReviewIds((current) => {
+        const next = new Set(current);
+        next.delete(selectedDeposit.id);
+        return next;
+      });
+      setSelectedDepositId(null);
+    } catch (error) {
+      setReviewError(error instanceof Error ? error.message : "Nao foi possivel excluir a coleta.");
+    }
+  };
+
+  const openEditDeposit = (deposit: FieldDeposit) => {
+    setEditDepositId(deposit.id);
+    setEditValues(editValuesFromDeposit(deposit));
+    setEditError("");
+  };
+
+  const closeEditDeposit = () => {
+    if (isUpdateBusy) return;
+    setEditDepositId(null);
+    setEditValues(null);
+    setEditError("");
+  };
+
+  const updateEditValue = <K extends keyof FieldDepositEditValues>(
+    key: K,
+    value: FieldDepositEditValues[K],
+  ) => {
+    setEditValues((current) => (current ? { ...current, [key]: value } : current));
+  };
+
+  const saveEditDeposit = async (event: ReactFormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!editDepositId || !editValues || !onUpdateDeposit) return;
+
+    if (!requiredEditFields(editValues)) {
+      setEditError("Preencha os campos obrigatorios antes de salvar.");
+      return;
+    }
+
+    setEditError("");
+
+    try {
+      await onUpdateDeposit(editDepositId, {
+        ...editValues,
+        vehiclePlate: editValues.vehiclePlate.toUpperCase(),
+        plotSecondary: editValues.placementMode === "between_plots" ? editValues.plotSecondary : "",
+      });
+      setSelectedDepositId(editDepositId);
+      setEditDepositId(null);
+      setEditValues(null);
+      setEditError("");
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : "Nao foi possivel editar a coleta.");
+    }
+  };
+
+  const toggleReviewRow = (depositId: string) => {
+    setSelectedReviewIds((current) => {
+      const next = new Set(current);
+      if (next.has(depositId)) {
+        next.delete(depositId);
+      } else {
+        next.add(depositId);
+      }
+      return next;
+    });
+  };
+
+  const toggleAllReviewRows = () => {
+    setSelectedReviewIds((current) => {
+      const next = new Set(current);
+
+      if (allReviewRowsSelected) {
+        reviewQueueDeposits.forEach((deposit) => next.delete(deposit.id));
+        return next;
+      }
+
+      reviewQueueDeposits.forEach((deposit) => next.add(deposit.id));
+      return next;
+    });
+  };
+
+  const reviewSelectedRows = async (status: ReviewStatus) => {
+    if (!onReviewDeposit || selectedReviewDeposits.length === 0) return;
+
+    setReviewError("");
+    setReviewBulkAction(status);
+
+    try {
+      for (const deposit of selectedReviewDeposits) {
+        await onReviewDeposit(deposit.id, status);
+      }
+      setSelectedReviewIds(new Set());
+    } catch (error) {
+      setReviewError(error instanceof Error ? error.message : "Nao foi possivel atualizar as coletas selecionadas.");
+    } finally {
+      setReviewBulkAction(null);
+    }
+  };
+
+  const deleteSelectedRows = async () => {
+    if (!onDeleteDeposit || selectedReviewDeposits.length === 0) return;
+
+    if (!canDeleteSelectedReviews) {
+      setReviewError("Para excluir em lote, selecione apenas coletas reprovadas.");
+      return;
+    }
+
+    const confirmed = window.confirm(`Tem certeza que deseja excluir ${selectedReviewCount} coleta(s) reprovada(s)?`);
+    if (!confirmed) return;
+
+    setReviewError("");
+    setReviewBulkAction("delete");
+
+    try {
+      for (const deposit of selectedReviewDeposits) {
+        await onDeleteDeposit(deposit.id);
+      }
+      setSelectedReviewIds(new Set());
+      setSelectedDepositId(null);
+    } catch (error) {
+      setReviewError(error instanceof Error ? error.message : "Nao foi possivel excluir as coletas selecionadas.");
+    } finally {
+      setReviewBulkAction(null);
     }
   };
 
@@ -2329,29 +2556,134 @@ export function Dashboard({
                   <strong>{reviewSummary.rejected}</strong>
                 </div>
               </div>
-              <div className="pending-list">
-                {pendingReviewDeposits.length > 0 ? (
-                  pendingReviewDeposits.slice(0, 6).map((deposit) => (
-                    <button
-                      type="button"
-                      className="pending-item pending-button"
-                      key={deposit.id}
-                      onClick={() => setSelectedDepositId(deposit.id)}
-                    >
-                      <div>
-                        <strong>{deposit.scaleTicketCode || "Sem ticket"}</strong>
-                        <span>
-                          {deposit.farm} · {formatPlot(deposit)} · {getLoadingOrigin(deposit)}
-                        </span>
-                      </div>
-                      <span className={`mini-chip review-${getReviewStatus(deposit)}`}>
-                        {reviewLabel(getReviewStatus(deposit))}
-                      </span>
-                    </button>
-                  ))
-                ) : (
-                  <div className="empty-inline">Nenhuma coleta aguardando validação nesta seleção.</div>
-                )}
+              <div className="review-bulk-toolbar">
+                <span>
+                  {selectedReviewCount > 0
+                    ? `${selectedReviewCount} selecionada(s)`
+                    : `${reviewQueueDeposits.length} coleta(s) na fila`}
+                </span>
+                <div>
+                  <button
+                    type="button"
+                    className="review-action approve"
+                    disabled={!onReviewDeposit || isBulkBusy || selectedReviewCount === 0}
+                    onClick={() => reviewSelectedRows("approved")}
+                  >
+                    <CheckCircle2 aria-hidden="true" />
+                    Aprovar
+                  </button>
+                  <button
+                    type="button"
+                    className="review-action reject"
+                    disabled={!onReviewDeposit || isBulkBusy || selectedReviewCount === 0}
+                    onClick={() => reviewSelectedRows("rejected")}
+                  >
+                    <XCircle aria-hidden="true" />
+                    Reprovar
+                  </button>
+                  <button
+                    type="button"
+                    className="review-action delete"
+                    disabled={!canDeleteSelectedReviews || isBulkBusy}
+                    onClick={deleteSelectedRows}
+                    title={canDeleteSelectedReviews ? "Excluir coletas reprovadas" : "Selecione apenas coletas reprovadas"}
+                  >
+                    <Trash2 aria-hidden="true" />
+                    Excluir
+                  </button>
+                </div>
+              </div>
+              <div className="table-scroll review-table-scroll">
+                <table className="review-table">
+                  <thead>
+                    <tr>
+                      <th className="review-check-col">
+                        <input
+                          type="checkbox"
+                          aria-label="Selecionar todas as coletas da fila"
+                          checked={allReviewRowsSelected}
+                          onChange={toggleAllReviewRows}
+                        />
+                      </th>
+                      <th>Ticket</th>
+                      <th>Motorista</th>
+                      <th>Destino</th>
+                      <th>Subproduto</th>
+                      <th>Status</th>
+                      <th>Detalhe</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reviewQueueDeposits.length > 0 ? (
+                      reviewQueueDeposits.map((deposit) => {
+                        const status = getReviewStatus(deposit);
+
+                        return (
+                          <tr
+                            key={deposit.id}
+                            className={selectedDeposit?.id === deposit.id ? "selected-row" : ""}
+                            onClick={() => setSelectedDepositId(deposit.id)}
+                          >
+                            <td className="review-check-col">
+                              <input
+                                type="checkbox"
+                                aria-label={`Selecionar ${deposit.scaleTicketCode || deposit.id}`}
+                                checked={selectedReviewIds.has(deposit.id)}
+                                onChange={() => toggleReviewRow(deposit.id)}
+                                onClick={(event) => event.stopPropagation()}
+                              />
+                            </td>
+                            <td>{deposit.scaleTicketCode || "Sem ticket"}</td>
+                            <td>{deposit.driverName || deposit.driverRegistration}</td>
+                            <td>
+                              <span className="stacked-table-cell">
+                                <strong>{deposit.farm}</strong>
+                                <small>{formatPlot(deposit)}</small>
+                              </span>
+                            </td>
+                            <td>{deposit.subproduct}</td>
+                            <td>
+                              <span className={`mini-chip review-${status}`}>
+                                {reviewLabel(status)}
+                              </span>
+                            </td>
+                            <td>
+                              <span className="row-action-group">
+                                <button
+                                  type="button"
+                                  className="row-action"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setSelectedDepositId(deposit.id);
+                                  }}
+                                >
+                                  Abrir
+                                </button>
+                                <button
+                                  type="button"
+                                  className="row-action"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setSelectedDepositId(deposit.id);
+                                    openEditDeposit(deposit);
+                                  }}
+                                >
+                                  Editar
+                                </button>
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td className="empty-table-cell" colSpan={7}>
+                          Nenhuma coleta aguardando validação nesta seleção.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </article>
 
@@ -2434,6 +2766,15 @@ export function Dashboard({
                     <div className="review-actions">
                       <button
                         type="button"
+                        className="review-action edit"
+                        disabled={!onUpdateDeposit || Boolean(updateBusyDepositId)}
+                        onClick={() => openEditDeposit(selectedDeposit)}
+                      >
+                        <Pencil aria-hidden="true" />
+                        Editar
+                      </button>
+                      <button
+                        type="button"
                         className="review-action approve"
                         disabled={!onReviewDeposit || isReviewBusy || selectedReviewStatus === "approved"}
                         onClick={() => reviewSelectedDeposit("approved")}
@@ -2449,6 +2790,16 @@ export function Dashboard({
                       >
                         <XCircle aria-hidden="true" />
                         Reprovar
+                      </button>
+                      <button
+                        type="button"
+                        className="review-action delete"
+                        disabled={!onDeleteDeposit || isDeleteBusy || selectedReviewStatus !== "rejected"}
+                        onClick={deleteSelectedDeposit}
+                        title={selectedReviewStatus === "rejected" ? "Excluir coleta reprovada" : "Reprove a coleta antes de excluir"}
+                      >
+                        <Trash2 aria-hidden="true" />
+                        Excluir
                       </button>
                     </div>
                   </div>
@@ -2533,13 +2884,25 @@ export function Dashboard({
                             </span>
                           </td>
                           <td>
-                            <button
-                              type="button"
-                              className="row-action"
-                              onClick={() => setSelectedDepositId(deposit.id)}
-                            >
-                              Abrir
-                            </button>
+                            <span className="row-action-group">
+                              <button
+                                type="button"
+                                className="row-action"
+                                onClick={() => setSelectedDepositId(deposit.id)}
+                              >
+                                Abrir
+                              </button>
+                              <button
+                                type="button"
+                                className="row-action"
+                                onClick={() => {
+                                  setSelectedDepositId(deposit.id);
+                                  openEditDeposit(deposit);
+                                }}
+                              >
+                                Editar
+                              </button>
+                            </span>
                           </td>
                         </tr>
                       );
@@ -2556,6 +2919,185 @@ export function Dashboard({
             </div>
           </article>
         </>
+      ) : null}
+
+      {editValues ? (
+        <div className="deposit-edit-backdrop" role="presentation">
+          <form className="deposit-edit-modal" onSubmit={saveEditDeposit}>
+            <header>
+              <div>
+                <span className="panel-kicker">
+                  <Pencil aria-hidden="true" />
+                  Editar coleta
+                </span>
+                <h2>{editValues.scaleTicketCode || "Coleta sem ticket"}</h2>
+              </div>
+              <button
+                type="button"
+                className="modal-icon-button"
+                onClick={closeEditDeposit}
+                aria-label="Fechar edição"
+              >
+                <X aria-hidden="true" />
+              </button>
+            </header>
+
+            <div className="deposit-edit-grid">
+              <label>
+                <span>Matrícula *</span>
+                <input
+                  value={editValues.driverRegistration}
+                  onChange={(event) => updateEditValue("driverRegistration", event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Motorista *</span>
+                <input
+                  value={editValues.driverName}
+                  onChange={(event) => updateEditValue("driverName", event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Placa *</span>
+                <input
+                  value={editValues.vehiclePlate}
+                  onChange={(event) => updateEditValue("vehiclePlate", event.target.value.toUpperCase())}
+                />
+              </label>
+              <label>
+                <span>Ticket *</span>
+                <input
+                  value={editValues.scaleTicketCode}
+                  onChange={(event) => updateEditValue("scaleTicketCode", event.target.value.toUpperCase())}
+                />
+              </label>
+              <label>
+                <span>Subproduto *</span>
+                <input
+                  list="edit-subproduct-options"
+                  value={editValues.subproduct}
+                  onChange={(event) => updateEditValue("subproduct", event.target.value)}
+                />
+                <datalist id="edit-subproduct-options">
+                  {subproductChoices.map((subproduct) => (
+                    <option value={subproduct} key={subproduct} />
+                  ))}
+                </datalist>
+              </label>
+              <label>
+                <span>Origem *</span>
+                <input
+                  list="edit-origin-options"
+                  value={editValues.loadingOrigin}
+                  onChange={(event) => updateEditValue("loadingOrigin", event.target.value)}
+                />
+                <datalist id="edit-origin-options">
+                  {loadingOriginChoices.map((origin) => (
+                    <option value={origin} key={origin} />
+                  ))}
+                </datalist>
+              </label>
+              <label>
+                <span>Fazenda *</span>
+                <select
+                  value={editValues.farm}
+                  onChange={(event) => updateEditValue("farm", event.target.value)}
+                >
+                  <option value="VILA NOVA">Vila Nova</option>
+                  <option value="FE EM DEUS">Fé em Deus</option>
+                </select>
+              </label>
+              <label>
+                <span>Aplicação *</span>
+                <select
+                  value={editValues.placementMode}
+                  onChange={(event) => updateEditValue(
+                    "placementMode",
+                    event.target.value === "between_plots" ? "between_plots" : "single_plot",
+                  )}
+                >
+                  <option value="single_plot">Na parcela</option>
+                  <option value="between_plots">Entre parcelas</option>
+                </select>
+              </label>
+              <label>
+                <span>Parcela principal *</span>
+                <input
+                  value={editValues.plotPrimary}
+                  onChange={(event) => updateEditValue("plotPrimary", event.target.value.toUpperCase())}
+                />
+              </label>
+              <label>
+                <span>{editValues.placementMode === "between_plots" ? "Parcela vizinha *" : "Parcela vizinha"}</span>
+                <input
+                  value={editValues.plotSecondary}
+                  disabled={editValues.placementMode !== "between_plots"}
+                  onChange={(event) => updateEditValue("plotSecondary", event.target.value.toUpperCase())}
+                />
+              </label>
+              <label>
+                <span>Data *</span>
+                <input
+                  type="date"
+                  value={editValues.depositDate}
+                  onChange={(event) => updateEditValue("depositDate", event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Hora *</span>
+                <input
+                  type="time"
+                  value={editValues.depositTime}
+                  onChange={(event) => updateEditValue("depositTime", event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Latitude</span>
+                <input
+                  inputMode="decimal"
+                  value={editValues.latitude ?? ""}
+                  onChange={(event) => updateEditValue("latitude", parseOptionalNumber(event.target.value))}
+                />
+              </label>
+              <label>
+                <span>Longitude</span>
+                <input
+                  inputMode="decimal"
+                  value={editValues.longitude ?? ""}
+                  onChange={(event) => updateEditValue("longitude", parseOptionalNumber(event.target.value))}
+                />
+              </label>
+              <label>
+                <span>Precisão GPS</span>
+                <input
+                  inputMode="decimal"
+                  value={editValues.locationAccuracy ?? ""}
+                  onChange={(event) => updateEditValue("locationAccuracy", parseOptionalNumber(event.target.value))}
+                />
+              </label>
+              <label className="deposit-edit-wide">
+                <span>Observação</span>
+                <textarea
+                  value={editValues.notes}
+                  onChange={(event) => updateEditValue("notes", event.target.value)}
+                  rows={3}
+                />
+              </label>
+            </div>
+
+            {editError ? <p className="edit-error">{editError}</p> : null}
+
+            <footer>
+              <button type="button" className="review-action" onClick={closeEditDeposit} disabled={isUpdateBusy}>
+                Cancelar
+              </button>
+              <button type="submit" className="review-action approve" disabled={!onUpdateDeposit || isUpdateBusy}>
+                <Save aria-hidden="true" />
+                Salvar
+              </button>
+            </footer>
+          </form>
+        </div>
       ) : null}
 
       {activeView === "conciliacao" ? (

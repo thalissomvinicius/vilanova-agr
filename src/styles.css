@@ -1613,6 +1613,86 @@ th {
   text-align: left;
 }
 
+.review-bulk-toolbar {
+  min-height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 10px;
+  background: var(--paper-muted);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.review-bulk-toolbar > span {
+  color: var(--green-900);
+  font-size: 0.86rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.review-bulk-toolbar > div {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.review-table-scroll {
+  max-height: 310px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.review-table {
+  width: max(100%, 760px);
+}
+
+.review-table th,
+.review-table td {
+  padding: 9px 8px;
+  font-size: 0.82rem;
+}
+
+.review-table tbody tr {
+  cursor: pointer;
+}
+
+.review-table tbody tr:hover td {
+  background: #f4f9f2;
+}
+
+.review-check-col {
+  width: 38px;
+  text-align: center;
+}
+
+.review-check-col input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--green-700);
+}
+
+.stacked-table-cell {
+  display: grid;
+  gap: 2px;
+}
+
+.stacked-table-cell strong {
+  color: var(--green-900);
+  font-size: 0.86rem;
+}
+
+.stacked-table-cell small {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
 tr.selected-row td {
   background: #edf5ed;
 }
@@ -1654,6 +1734,141 @@ tr.selected-row td {
   border: 1px solid var(--line);
   background: #ffffff;
   color: var(--green-900);
+}
+
+.row-action-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.deposit-edit-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  padding: 24px;
+  background: rgba(8, 33, 23, 0.46);
+  display: grid;
+  place-items: center;
+}
+
+.deposit-edit-modal {
+  width: min(940px, 100%);
+  max-height: calc(100dvh - 48px);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 8px;
+  padding: 18px;
+  background: var(--paper);
+  box-shadow: 0 24px 80px rgba(5, 24, 16, 0.28);
+  overflow: auto;
+}
+
+.deposit-edit-modal header,
+.deposit-edit-modal footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.deposit-edit-modal header {
+  margin-bottom: 14px;
+}
+
+.deposit-edit-modal h2 {
+  margin: 4px 0 0;
+  color: var(--green-900);
+  font-size: 1.28rem;
+}
+
+.modal-icon-button {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--green-900);
+  display: inline-grid;
+  place-items: center;
+}
+
+.modal-icon-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.deposit-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.deposit-edit-grid label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  color: var(--green-900);
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.deposit-edit-grid input,
+.deposit-edit-grid select,
+.deposit-edit-grid textarea {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #ffffff;
+  color: var(--green-900);
+  font: inherit;
+  font-size: 0.88rem;
+}
+
+.deposit-edit-grid textarea {
+  resize: vertical;
+}
+
+.deposit-edit-grid input:disabled {
+  background: #f2f5ef;
+  color: var(--text-muted);
+}
+
+.deposit-edit-wide {
+  grid-column: 1 / -1;
+}
+
+.edit-error {
+  margin: 10px 0 0;
+  color: var(--danger);
+  font-weight: 900;
+}
+
+.deposit-edit-modal footer {
+  margin-top: 14px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 760px) {
+  .deposit-edit-backdrop {
+    padding: 8px;
+    align-items: start;
+  }
+
+  .deposit-edit-modal {
+    max-height: calc(100dvh - 16px);
+  }
+
+  .deposit-edit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .deposit-edit-modal header,
+  .deposit-edit-modal footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 .reconciliation-layout {
@@ -1752,6 +1967,16 @@ tr.selected-row td {
 .review-action.reject {
   border-color: rgba(200, 67, 15, 0.24);
   color: #9b3d19;
+}
+
+.review-action.edit {
+  border-color: rgba(47, 111, 159, 0.24);
+  color: #2f6f9f;
+}
+
+.review-action.delete {
+  border-color: rgba(137, 53, 46, 0.28);
+  color: #89352e;
 }
 
 .review-action:hover:not(:disabled) {

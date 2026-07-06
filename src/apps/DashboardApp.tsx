@@ -4,8 +4,8 @@ import { Dashboard } from "../components/Dashboard";
 import { Login } from "../components/Login";
 import { logoutDashboardUser, refreshDashboardSession, type DashboardUser } from "../lib/auth";
 import { loadRemoteDashboardData } from "../lib/remoteData";
-import { reviewFieldDeposit } from "../lib/review";
-import type { FieldDeposit, ReviewStatus, ScaleTicket } from "../types";
+import { deleteFieldDeposit, reviewFieldDeposit, updateFieldDeposit } from "../lib/review";
+import type { FieldDeposit, FieldDepositEditValues, ReviewStatus, ScaleTicket } from "../types";
 
 export function DashboardApp() {
   const [user, setUser] = useState<DashboardUser | null>(null);
@@ -14,6 +14,8 @@ export function DashboardApp() {
   const [loading, setLoading] = useState(true);
   const [dataMode, setDataMode] = useState("Aguardando Supabase");
   const [reviewBusyDepositId, setReviewBusyDepositId] = useState<string | null>(null);
+  const [deleteBusyDepositId, setDeleteBusyDepositId] = useState<string | null>(null);
+  const [updateBusyDepositId, setUpdateBusyDepositId] = useState<string | null>(null);
 
   const refresh = useCallback(async (profile: DashboardUser) => {
     const remoteData = await loadRemoteDashboardData(profile);
@@ -94,6 +96,58 @@ export function DashboardApp() {
     }
   };
 
+  const handleDeleteDeposit = async (depositId: string) => {
+    if (!user) return;
+
+    setDeleteBusyDepositId(depositId);
+
+    try {
+      const result = await deleteFieldDeposit(user, depositId);
+      setDeposits((current) => current.filter((deposit) => deposit.id !== result.id));
+      setScaleTickets((current) => current.filter((ticket) => ticket.fieldDepositId !== result.id));
+      await refresh(user);
+    } finally {
+      setDeleteBusyDepositId(null);
+    }
+  };
+
+  const handleUpdateDeposit = async (depositId: string, values: FieldDepositEditValues) => {
+    if (!user) return;
+
+    setUpdateBusyDepositId(depositId);
+
+    try {
+      const result = await updateFieldDeposit(user, depositId, values);
+      setDeposits((current) => current.map((deposit) => (
+        deposit.id === result.id
+          ? {
+              ...deposit,
+              driverRegistration: result.driverRegistration,
+              driverName: result.driverName,
+              vehiclePlate: result.vehiclePlate,
+              subproduct: result.subproduct,
+              loadingOrigin: result.loadingOrigin,
+              scaleTicketCode: result.scaleTicketCode,
+              farm: result.farm,
+              placementMode: result.placementMode,
+              plotPrimary: result.plotPrimary,
+              plotSecondary: result.plotSecondary,
+              depositDate: result.depositDate,
+              depositTime: result.depositTime,
+              latitude: result.latitude,
+              longitude: result.longitude,
+              locationAccuracy: result.locationAccuracy,
+              notes: result.notes,
+              updatedAt: result.updatedAt || deposit.updatedAt,
+            }
+          : deposit
+      )));
+      await refresh(user);
+    } finally {
+      setUpdateBusyDepositId(null);
+    }
+  };
+
   if (!user && !loading) {
     return <Login onLogin={handleLogin} />;
   }
@@ -148,7 +202,11 @@ export function DashboardApp() {
             deposits={deposits}
             scaleTickets={scaleTickets}
             onReviewDeposit={handleReviewDeposit}
+            onDeleteDeposit={handleDeleteDeposit}
+            onUpdateDeposit={handleUpdateDeposit}
             reviewBusyDepositId={reviewBusyDepositId}
+            deleteBusyDepositId={deleteBusyDepositId}
+            updateBusyDepositId={updateBusyDepositId}
           />
         ) : null}
       </section>

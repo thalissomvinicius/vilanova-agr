@@ -51,6 +51,25 @@ export interface FieldDeposit {
   demoRecord?: boolean;
 }
 
+export interface FieldDepositEditValues {
+  driverRegistration: string;
+  driverName: string;
+  vehiclePlate: string;
+  subproduct: string;
+  loadingOrigin: string;
+  scaleTicketCode: string;
+  farm: string;
+  placementMode: PlacementMode;
+  plotPrimary: string;
+  plotSecondary: string;
+  depositDate: string;
+  depositTime: string;
+  latitude: number | null;
+  longitude: number | null;
+  locationAccuracy: number | null;
+  notes: string;
+}
+
 export interface ScaleTicket {
   id: string;
   fieldDepositId: string;
