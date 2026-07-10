@@ -2790,10 +2790,6 @@ export function Dashboard({
                       <strong>{selectedTicket ? formatTonnes(selectedTicket.netWeightKg) : "Aguardando"}</strong>
                     </div>
                     <div>
-                      <span>Ciclo</span>
-                      <strong>{selectedTicket ? formatMinutes(getCycleMinutes(selectedTicket)) : "-"}</strong>
-                    </div>
-                    <div>
                       <span>GPS</span>
                       <strong>
                         {selectedDeposit.latitude && selectedDeposit.longitude
@@ -2814,10 +2810,6 @@ export function Dashboard({
                     <div>
                       <span>Validação</span>
                       <strong>{reviewLabel(selectedReviewStatus)}</strong>
-                    </div>
-                    <div>
-                      <span>Validado por</span>
-                      <strong>{selectedDeposit.reviewedByLabel || "-"}</strong>
                     </div>
                   </div>
                   {selectedDeposit.dumpPhotoDataUrl ? (
