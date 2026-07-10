@@ -1,4 +1,4 @@
-import { supabase, supabaseConfigured } from "./supabase";
+import { supabase, supabaseConfig, supabaseConfigured } from "./supabase";
 import type { DashboardUser } from "./auth";
 import type { FieldDeposit, LoadingOrigin, PlacementMode, ReviewStatus, ScaleTicket, Subproduct } from "../types";
 
@@ -10,8 +10,11 @@ interface RemoteDashboardData {
 
 type RemoteRow = Record<string, unknown>;
 type MobileResponseRow = Record<string, unknown>;
+type AttachmentRow = Record<string, unknown>;
 
 const SUBPRODUCT_FORM_ID = "form_subprodutos_despejo";
+const ATTACHMENT_BUCKET = "mobile-anexos";
+const PHOTO_SIGNED_URL_SECONDS = 60 * 60 * 24 * 7;
 
 function text(value: unknown, fallback = "") {
   if (value === null || value === undefined) return fallback;
@@ -35,6 +38,54 @@ function objectValue(value: unknown): Record<string, unknown> {
 function valueFromObject(source: Record<string, unknown>, key: string) {
   const value = source[key];
   return value === null || value === undefined ? "" : value;
+}
+
+function encodeStoragePath(path: string) {
+  return path.split("/").map(encodeURIComponent).join("/");
+}
+
+function stableStorageObjectUrl(path: string) {
+  if (!supabaseConfig.url || !path) return "";
+  return `${supabaseConfig.url}/storage/v1/object/${ATTACHMENT_BUCKET}/${encodeStoragePath(path)}`;
+}
+
+function storagePathFromUrl(value: unknown) {
+  const raw = text(value);
+  if (!raw || raw.startsWith("data:") || raw.startsWith("file:")) return "";
+  if (!raw.startsWith("http") && raw.includes("/")) return raw;
+
+  const markers = [
+    `/storage/v1/object/${ATTACHMENT_BUCKET}/`,
+    `/storage/v1/object/sign/${ATTACHMENT_BUCKET}/`,
+  ];
+
+  const marker = markers.find((candidate) => raw.includes(candidate));
+  if (!marker) return "";
+
+  const afterMarker = raw.slice(raw.indexOf(marker) + marker.length).split("?")[0];
+  return afterMarker.split("/").map((segment) => {
+    try {
+      return decodeURIComponent(segment);
+    } catch {
+      return segment;
+    }
+  }).join("/");
+}
+
+async function signedStorageUrl(pathOrUrl: unknown) {
+  if (!supabase) return "";
+
+  const storagePath = storagePathFromUrl(pathOrUrl);
+  if (!storagePath) return text(pathOrUrl);
+
+  const { data, error } = await supabase.storage
+    .from(ATTACHMENT_BUCKET)
+    .createSignedUrl(storagePath, PHOTO_SIGNED_URL_SECONDS);
+
+  if (error) return text(pathOrUrl);
+
+  const signed = data as { signedUrl?: string; signedURL?: string } | null;
+  return signed?.signedUrl || signed?.signedURL || text(pathOrUrl);
 }
 
 function numberValue(value: unknown) {
@@ -208,6 +259,19 @@ function mapRows(rows: RemoteRow[], source: RemoteDashboardData["source"]): Remo
   };
 }
 
+async function signPhotoUrls(rows: RemoteRow[]) {
+  return Promise.all(rows.map(async (row) => {
+    const storagePath = text(row.dump_photo_storage_path);
+    const photoUrl = text(row.dump_photo_data_url);
+    const signedUrl = storagePath
+      ? await signedStorageUrl(storagePath)
+      : await signedStorageUrl(photoUrl);
+
+    if (!signedUrl || signedUrl === photoUrl) return row;
+    return { ...row, dump_photo_data_url: signedUrl };
+  }));
+}
+
 function gpsObject(value: unknown) {
   const gps = objectValue(value);
   const latitude = numberValue(gps.latitude);
@@ -225,7 +289,7 @@ function gpsObject(value: unknown) {
   };
 }
 
-function mobileResponseToDashboardRow(row: MobileResponseRow): RemoteRow | null {
+function mobileResponseToDashboardRow(row: MobileResponseRow, attachment?: AttachmentRow): RemoteRow | null {
   const status = text(row.status);
   if (status === "excluido") return null;
 
@@ -244,6 +308,8 @@ function mobileResponseToDashboardRow(row: MobileResponseRow): RemoteRow | null 
   const photo = objectValue(valueFromObject(dados, "foto_despejo"));
   const photoGps = gpsObject(photo.gps || photo.gpsStamp);
   const observation = valueFromObject(dados, "observacao");
+  const attachmentPath = text(attachment?.storage_path);
+  const attachmentUrl = text(attachment?.signed_url);
 
   return {
     id: `mobile:${responseId}`,
@@ -263,8 +329,9 @@ function mobileResponseToDashboardRow(row: MobileResponseRow): RemoteRow | null 
     latitude: gps.latitude,
     longitude: gps.longitude,
     location_accuracy: gps.accuracy,
-    dump_photo_data_url: text(photo.uri).startsWith("http") ? text(photo.uri) : null,
-    dump_photo_name: text(photo.nome_arquivo || photo.fileName),
+    dump_photo_storage_path: attachmentPath || null,
+    dump_photo_data_url: attachmentUrl || (text(photo.uri).startsWith("http") ? text(photo.uri) : null),
+    dump_photo_name: text(attachment?.nome_arquivo || photo.nome_arquivo || photo.fileName),
     dump_photo_latitude: photoGps.latitude,
     dump_photo_longitude: photoGps.longitude,
     dump_photo_accuracy: photoGps.accuracy,
@@ -297,7 +364,9 @@ async function ensureMobileRowsInFieldDeposits(rows: RemoteRow[]) {
     latitude: row.latitude,
     longitude: row.longitude,
     location_accuracy: row.location_accuracy,
-    dump_photo_data_url: row.dump_photo_data_url,
+    dump_photo_data_url: text(row.dump_photo_storage_path)
+      ? stableStorageObjectUrl(text(row.dump_photo_storage_path))
+      : row.dump_photo_data_url,
     dump_photo_name: row.dump_photo_name,
     dump_photo_latitude: row.dump_photo_latitude,
     dump_photo_longitude: row.dump_photo_longitude,
@@ -322,7 +391,7 @@ async function loadFromView() {
     .limit(1200);
 
   if (error) throw error;
-  return mapRows(normalizeRows(data), "supabase-view");
+  return mapRows(await signPhotoUrls(normalizeRows(data)), "supabase-view");
 }
 
 async function loadFromDashboardRpc(user: DashboardUser) {
@@ -333,7 +402,38 @@ async function loadFromDashboardRpc(user: DashboardUser) {
   });
 
   if (error) throw error;
-  return mapRows(normalizeRows(data), "dashboard-rpc");
+  return mapRows(await signPhotoUrls(normalizeRows(data)), "dashboard-rpc");
+}
+
+async function loadAttachmentByResponseId(responseIds: string[]) {
+  if (!supabase || responseIds.length === 0) return new Map<string, AttachmentRow>();
+
+  const { data, error } = await supabase
+    .from("mobile_anexos")
+    .select("resposta_id, campo_id, storage_path, nome_arquivo, tamanho_bytes, tipo_mime, criado_em")
+    .in("resposta_id", responseIds)
+    .order("criado_em", { ascending: false });
+
+  if (error) throw error;
+
+  const attachmentMap = new Map<string, AttachmentRow>();
+  const rows = Array.isArray(data) ? data as AttachmentRow[] : [];
+
+  for (const row of rows) {
+    const responseId = text(row.resposta_id);
+    const fieldId = text(row.campo_id).toLowerCase();
+    const storagePath = text(row.storage_path);
+
+    if (!responseId || !storagePath || !fieldId.includes("foto_despejo")) continue;
+    if (attachmentMap.has(responseId)) continue;
+
+    attachmentMap.set(responseId, {
+      ...row,
+      signed_url: await signedStorageUrl(storagePath),
+    });
+  }
+
+  return attachmentMap;
 }
 
 async function loadFromMobileResponses() {
@@ -349,8 +449,13 @@ async function loadFromMobileResponses() {
 
   if (error) throw error;
 
-  const rows = (Array.isArray(data) ? data : [])
-    .map((row) => mobileResponseToDashboardRow(row as MobileResponseRow))
+  const mobileRows = Array.isArray(data) ? data as MobileResponseRow[] : [];
+  const attachmentByResponseId = await loadAttachmentByResponseId(
+    mobileRows.map((row) => text(row.id)).filter(Boolean),
+  );
+
+  const rows = mobileRows
+    .map((row) => mobileResponseToDashboardRow(row, attachmentByResponseId.get(text(row.id))))
     .filter((row): row is RemoteRow => Boolean(row));
 
   try {
