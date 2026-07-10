@@ -5,14 +5,36 @@ import type { FieldDeposit, LoadingOrigin, PlacementMode, ReviewStatus, ScaleTic
 interface RemoteDashboardData {
   deposits: FieldDeposit[];
   scaleTickets: ScaleTicket[];
-  source: "supabase-view" | "dashboard-rpc";
+  source: "supabase-view" | "dashboard-rpc" | "mobile-responses";
 }
 
 type RemoteRow = Record<string, unknown>;
+type MobileResponseRow = Record<string, unknown>;
+
+const SUBPRODUCT_FORM_ID = "form_subprodutos_despejo";
 
 function text(value: unknown, fallback = "") {
   if (value === null || value === undefined) return fallback;
   return String(value).trim() || fallback;
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  return typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function valueFromObject(source: Record<string, unknown>, key: string) {
+  const value = source[key];
+  return value === null || value === undefined ? "" : value;
 }
 
 function numberValue(value: unknown) {
@@ -60,6 +82,17 @@ function normalizeOrigin(value: unknown): LoadingOrigin {
 function normalizeReviewStatus(value: unknown): ReviewStatus {
   const status = text(value, "pending");
   if (status === "approved" || status === "rejected") return status;
+  return "pending";
+}
+
+function reviewStatusFromMobile(value: unknown): ReviewStatus {
+  const status = text(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  if (status.includes("aprov")) return "approved";
+  if (status.includes("reprov") || status.includes("exclu")) return "rejected";
   return "pending";
 }
 
@@ -175,6 +208,110 @@ function mapRows(rows: RemoteRow[], source: RemoteDashboardData["source"]): Remo
   };
 }
 
+function gpsObject(value: unknown) {
+  const gps = objectValue(value);
+  const latitude = numberValue(gps.latitude);
+  const longitude = numberValue(gps.longitude);
+
+  if (latitude === null || longitude === null) {
+    return { latitude: null, longitude: null, accuracy: null, capturedAt: null };
+  }
+
+  return {
+    latitude,
+    longitude,
+    accuracy: numberValue(gps.precisao ?? gps.accuracy),
+    capturedAt: text(gps.capturado_em || gps.capturedAt) || null,
+  };
+}
+
+function mobileResponseToDashboardRow(row: MobileResponseRow): RemoteRow | null {
+  const status = text(row.status);
+  if (status === "excluido") return null;
+
+  const responseId = text(row.id);
+  const dados = objectValue(row.dados_json);
+  if (!responseId || text(row.formulario_id) !== SUBPRODUCT_FORM_ID) return null;
+
+  const subproductOption = text(valueFromObject(dados, "subproduto"));
+  const subproductOther = text(valueFromObject(dados, "subproduto_outro"));
+  const originOption = text(valueFromObject(dados, "origem_carregamento"));
+  const originOther = text(valueFromObject(dados, "origem_carregamento_outro"));
+  const farmOption = text(valueFromObject(dados, "nome_fazenda"));
+  const farmOther = text(valueFromObject(dados, "nome_fazenda_outro"));
+  const placementLabel = text(valueFromObject(dados, "tipo_despejo"));
+  const gps = gpsObject(valueFromObject(dados, "gps_despejo"));
+  const photo = objectValue(valueFromObject(dados, "foto_despejo"));
+  const photoGps = gpsObject(photo.gps || photo.gpsStamp);
+  const observation = valueFromObject(dados, "observacao");
+
+  return {
+    id: `mobile:${responseId}`,
+    source_response_id: responseId,
+    driver_registration: text(valueFromObject(dados, "matricula_motorista")),
+    driver_name: text(valueFromObject(dados, "nome_motorista")),
+    vehicle_plate: text(valueFromObject(dados, "placa_veiculo")).toUpperCase(),
+    subproduct: subproductOption === "Outras" ? subproductOther : subproductOption,
+    loading_origin: originOption === "Outras" ? originOther : originOption,
+    scale_ticket_code: text(valueFromObject(dados, "ticket_balanca")).toUpperCase(),
+    farm: farmOption === "OUTRAS" ? farmOther : farmOption,
+    placement_mode: placementLabel === "Entre parcelas" ? "between_plots" : "single_plot",
+    plot_primary: text(valueFromObject(dados, "parcela_principal") || valueFromObject(dados, "parcela")).toUpperCase(),
+    plot_secondary: placementLabel === "Entre parcelas" ? text(valueFromObject(dados, "parcela_destino_2")).toUpperCase() : "",
+    deposit_date: text(valueFromObject(dados, "data_registro")),
+    deposit_time: text(valueFromObject(dados, "hora_despejo")),
+    latitude: gps.latitude,
+    longitude: gps.longitude,
+    location_accuracy: gps.accuracy,
+    dump_photo_data_url: text(photo.uri).startsWith("http") ? text(photo.uri) : null,
+    dump_photo_name: text(photo.nome_arquivo || photo.fileName),
+    dump_photo_latitude: photoGps.latitude,
+    dump_photo_longitude: photoGps.longitude,
+    dump_photo_accuracy: photoGps.accuracy,
+    dump_photo_captured_at: photoGps.capturedAt || text(photo.capturedAt) || null,
+    notes: typeof observation === "object" ? text(objectValue(observation).texto) : text(observation),
+    review_status: reviewStatusFromMobile(row.status),
+    created_at: row.criado_em,
+    updated_at: row.updated_at || row.enviado_em || row.criado_em,
+    client_synced_at: row.enviado_em || row.updated_at || row.criado_em,
+  };
+}
+
+async function ensureMobileRowsInFieldDeposits(rows: RemoteRow[]) {
+  if (!supabase || rows.length === 0) return;
+
+  const p_rows = rows.map((row) => ({
+    source_response_id: row.source_response_id,
+    driver_registration: row.driver_registration,
+    driver_name: row.driver_name,
+    vehicle_plate: row.vehicle_plate,
+    subproduct: row.subproduct,
+    loading_origin: row.loading_origin,
+    scale_ticket_code: row.scale_ticket_code,
+    farm: row.farm,
+    placement_mode: row.placement_mode,
+    plot_primary: row.plot_primary,
+    plot_secondary: row.plot_secondary,
+    deposit_date: row.deposit_date,
+    deposit_time: row.deposit_time,
+    latitude: row.latitude,
+    longitude: row.longitude,
+    location_accuracy: row.location_accuracy,
+    dump_photo_data_url: row.dump_photo_data_url,
+    dump_photo_name: row.dump_photo_name,
+    dump_photo_latitude: row.dump_photo_latitude,
+    dump_photo_longitude: row.dump_photo_longitude,
+    dump_photo_accuracy: row.dump_photo_accuracy,
+    dump_photo_captured_at: row.dump_photo_captured_at,
+    notes: row.notes,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    client_synced_at: row.client_synced_at,
+  }));
+
+  await supabase.rpc("mobile_sync_subproduct_deposits", { p_rows });
+}
+
 async function loadFromView() {
   if (!supabase) return null;
 
@@ -199,19 +336,52 @@ async function loadFromDashboardRpc(user: DashboardUser) {
   return mapRows(normalizeRows(data), "dashboard-rpc");
 }
 
+async function loadFromMobileResponses() {
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from("mobile_respostas")
+    .select("id, formulario_id, usuario_id, dados_json, status, criado_em, enviado_em, updated_at")
+    .eq("formulario_id", SUBPRODUCT_FORM_ID)
+    .neq("status", "excluido")
+    .order("criado_em", { ascending: false })
+    .limit(500);
+
+  if (error) throw error;
+
+  const rows = (Array.isArray(data) ? data : [])
+    .map((row) => mobileResponseToDashboardRow(row as MobileResponseRow))
+    .filter((row): row is RemoteRow => Boolean(row));
+
+  try {
+    await ensureMobileRowsInFieldDeposits(rows);
+  } catch {
+    // The fallback still shows received field records even when the bridge is unavailable.
+  }
+
+  return mapRows(rows, "mobile-responses");
+}
+
 export async function loadRemoteDashboardData(user: DashboardUser) {
   if (!supabaseConfigured || !supabase) return null;
 
   try {
     const viewData = await loadFromView();
-    if (viewData) return viewData;
+    if (viewData?.deposits.length) return viewData;
   } catch {
     // The authenticated-RLS path is not always available when the dashboard uses matricula RPC sessions.
   }
 
   try {
     const rpcData = await loadFromDashboardRpc(user);
-    if (rpcData) return rpcData;
+    if (rpcData?.deposits.length) return rpcData;
+  } catch {
+    // Fall back to mobile_respostas below.
+  }
+
+  try {
+    const mobileData = await loadFromMobileResponses();
+    if (mobileData) return mobileData;
   } catch {
     return null;
   }

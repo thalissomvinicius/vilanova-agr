@@ -1548,7 +1548,39 @@ th {
 }
 
 .collection-grid-detail {
-  grid-template-columns: minmax(0, 1fr) minmax(380px, 0.92fr);
+  grid-template-columns: minmax(520px, 1.08fr) minmax(420px, 0.92fr);
+  align-items: start;
+}
+
+.collection-review-layout {
+  gap: 14px;
+}
+
+.review-summary-panel {
+  grid-column: 1 / -1;
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: minmax(220px, 0.36fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.review-summary-panel header {
+  margin-bottom: 0;
+}
+
+.review-summary-panel .review-stat-grid {
+  margin-bottom: 0;
+}
+
+.review-queue-panel,
+.review-detail-panel {
+  min-height: 460px;
+}
+
+.review-detail-panel {
+  position: sticky;
+  top: 12px;
 }
 
 .detail-panel {
@@ -1585,6 +1617,11 @@ th {
   display: grid;
   align-content: space-between;
   gap: 6px;
+}
+
+.review-detail-grid div {
+  min-height: 66px;
+  padding: 9px 10px;
 }
 
 .detail-grid span {
@@ -1642,7 +1679,7 @@ th {
 }
 
 .review-table-scroll {
-  max-height: 310px;
+  max-height: 420px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #ffffff;
@@ -1656,6 +1693,13 @@ th {
 .review-table td {
   padding: 9px 8px;
   font-size: 0.82rem;
+}
+
+.review-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #ffffff;
 }
 
 .review-table tbody tr {
@@ -1900,7 +1944,7 @@ tr.selected-row td {
 }
 
 .review-action-panel {
-  margin-top: 12px;
+  margin: 0 0 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px;
@@ -1909,6 +1953,14 @@ tr.selected-row td {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.collection-table-panel {
+  margin-top: 14px;
+}
+
+.collection-table-panel table {
+  width: max(100%, 1180px);
 }
 
 .review-action-panel div:first-child {
@@ -4604,6 +4656,30 @@ tr.selected-row td {
   .geo-map-layout {
     grid-template-columns: 1fr;
   }
+
+  .review-summary-panel {
+    grid-column: auto;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .review-queue-panel,
+  .review-detail-panel {
+    min-height: auto;
+  }
+
+  .review-detail-panel {
+    position: static;
+  }
+
+  .review-action-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .review-actions {
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 620px) {
@@ -4654,6 +4730,20 @@ tr.selected-row td {
 
   .review-action {
     flex: 1 1 140px;
+    justify-content: center;
+  }
+
+  .review-bulk-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .review-bulk-toolbar > div,
+  .row-action-group {
+    width: 100%;
+  }
+
+  .row-action {
     justify-content: center;
   }
 

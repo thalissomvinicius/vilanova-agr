@@ -100,6 +100,19 @@ function toDatabasePatch(values: FieldDepositEditValues) {
   };
 }
 
+async function resolveFieldDepositId(depositId: string) {
+  if (!depositId.startsWith("mobile:")) return depositId;
+  if (!supabase) return depositId;
+
+  const sourceResponseId = depositId.slice("mobile:".length);
+  const { data, error } = await supabase.rpc("mobile_subproduct_uuid", {
+    p_source_response_id: sourceResponseId,
+  });
+
+  if (error) throw error;
+  return String(data || depositId);
+}
+
 async function reviewBySessionRpc(
   user: DashboardUser,
   depositId: string,
@@ -158,16 +171,18 @@ export async function reviewFieldDeposit(
     throw new Error("Supabase nao configurado.");
   }
 
+  const resolvedDepositId = await resolveFieldDepositId(depositId);
+
   if (user.sessionToken) {
     try {
-      const result = await reviewBySessionRpc(user, depositId, status, notes);
+      const result = await reviewBySessionRpc(user, resolvedDepositId, status, notes);
       if (result) return result;
     } catch {
       // Projects without the dashboard RPC use the native Supabase Auth path below.
     }
   }
 
-  const result = await reviewBySupabaseAuth(user, depositId, status, notes);
+  const result = await reviewBySupabaseAuth(user, resolvedDepositId, status, notes);
   if (!result) throw new Error("Nao foi possivel atualizar a validacao da coleta.");
   return result;
 }
@@ -219,9 +234,11 @@ export async function deleteFieldDeposit(
     throw new Error("Supabase nao configurado.");
   }
 
+  const resolvedDepositId = await resolveFieldDepositId(depositId);
+
   if (user.sessionToken) {
     try {
-      const result = await deleteBySessionRpc(user, depositId);
+      const result = await deleteBySessionRpc(user, resolvedDepositId);
       if (result) return result;
     } catch (error) {
       if (!isMissingRpcError(error)) throw error;
@@ -229,7 +246,7 @@ export async function deleteFieldDeposit(
     }
   }
 
-  const result = await deleteBySupabaseAuth(depositId);
+  const result = await deleteBySupabaseAuth(resolvedDepositId);
   if (!result) throw new Error("Nao foi possivel excluir a coleta.");
   return result;
 }
@@ -303,9 +320,11 @@ export async function updateFieldDeposit(
     throw new Error("Supabase nao configurado.");
   }
 
+  const resolvedDepositId = await resolveFieldDepositId(depositId);
+
   if (user.sessionToken) {
     try {
-      const result = await updateBySessionRpc(user, depositId, values);
+      const result = await updateBySessionRpc(user, resolvedDepositId, values);
       if (result) return result;
     } catch (error) {
       if (!isMissingRpcError(error)) throw error;
@@ -313,7 +332,7 @@ export async function updateFieldDeposit(
     }
   }
 
-  const result = await updateBySupabaseAuth(depositId, values);
+  const result = await updateBySupabaseAuth(resolvedDepositId, values);
   if (!result) throw new Error("Nao foi possivel editar a coleta.");
   return result;
 }

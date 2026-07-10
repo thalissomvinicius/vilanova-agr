@@ -2529,14 +2529,14 @@ export function Dashboard({
 
       {activeView === "coletas" ? (
         <>
-          <div className="collection-grid collection-grid-detail">
-            <article className="collection-panel">
+          <div className="collection-grid collection-grid-detail collection-review-layout">
+            <article className="collection-panel review-summary-panel">
               <header>
                 <span className="panel-kicker">
                   <ListChecks aria-hidden="true" />
-                  Validacao
+                  Validação
                 </span>
-                <h2>Coletas aguardando validação</h2>
+                <h2>Fluxo de coletas</h2>
               </header>
               <div className="compact-stat-grid compact-stat-grid-4 review-stat-grid">
                 <div>
@@ -2556,6 +2556,16 @@ export function Dashboard({
                   <strong>{reviewSummary.rejected}</strong>
                 </div>
               </div>
+            </article>
+
+            <article className="collection-panel review-queue-panel">
+              <header>
+                <span className="panel-kicker">
+                  <ClipboardList aria-hidden="true" />
+                  Fila
+                </span>
+                <h2>Coletas para validação</h2>
+              </header>
               <div className="review-bulk-toolbar">
                 <span>
                   {selectedReviewCount > 0
@@ -2687,17 +2697,72 @@ export function Dashboard({
               </div>
             </article>
 
-            <article className="detail-panel">
+            <article className="detail-panel review-detail-panel">
               <header>
-                <span className="panel-kicker">
-                  <ClipboardCheck aria-hidden="true" />
-                  Detalhe
-                </span>
-                <h2>{selectedDeposit ? selectedDeposit.scaleTicketCode || selectedDeposit.id : "Sem registro"}</h2>
+                <div>
+                  <span className="panel-kicker">
+                    <ClipboardCheck aria-hidden="true" />
+                    Detalhe
+                  </span>
+                  <h2>{selectedDeposit ? selectedDeposit.scaleTicketCode || selectedDeposit.id : "Sem registro"}</h2>
+                </div>
+                {selectedDeposit ? (
+                  <span className={`mini-chip review-${selectedReviewStatus}`}>
+                    {reviewLabel(selectedReviewStatus)}
+                  </span>
+                ) : null}
               </header>
               {selectedDeposit ? (
                 <>
-                  <div className="detail-grid">
+                  <div className="review-action-panel">
+                    <div>
+                      <strong>Validação da coleta</strong>
+                      <span>
+                        Apenas coletas aprovadas entram nos gráficos da aba Análise.
+                      </span>
+                      {reviewError ? <em>{reviewError}</em> : null}
+                    </div>
+                    <div className="review-actions">
+                      <button
+                        type="button"
+                        className="review-action edit"
+                        disabled={!onUpdateDeposit || Boolean(updateBusyDepositId)}
+                        onClick={() => openEditDeposit(selectedDeposit)}
+                      >
+                        <Pencil aria-hidden="true" />
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        className="review-action approve"
+                        disabled={!onReviewDeposit || isReviewBusy || selectedReviewStatus === "approved"}
+                        onClick={() => reviewSelectedDeposit("approved")}
+                      >
+                        <CheckCircle2 aria-hidden="true" />
+                        Aprovar
+                      </button>
+                      <button
+                        type="button"
+                        className="review-action reject"
+                        disabled={!onReviewDeposit || isReviewBusy || selectedReviewStatus === "rejected"}
+                        onClick={() => reviewSelectedDeposit("rejected")}
+                      >
+                        <XCircle aria-hidden="true" />
+                        Reprovar
+                      </button>
+                      <button
+                        type="button"
+                        className="review-action delete"
+                        disabled={!onDeleteDeposit || isDeleteBusy || selectedReviewStatus !== "rejected"}
+                        onClick={deleteSelectedDeposit}
+                        title={selectedReviewStatus === "rejected" ? "Excluir coleta reprovada" : "Reprove a coleta antes de excluir"}
+                      >
+                        <Trash2 aria-hidden="true" />
+                        Excluir
+                      </button>
+                    </div>
+                  </div>
+                  <div className="detail-grid review-detail-grid">
                     <div>
                       <span>Motorista</span>
                       <strong>{selectedDeposit.driverName || selectedDeposit.driverRegistration}</strong>
@@ -2755,54 +2820,6 @@ export function Dashboard({
                       <strong>{selectedDeposit.reviewedByLabel || "-"}</strong>
                     </div>
                   </div>
-                  <div className="review-action-panel">
-                    <div>
-                      <strong>Validação da coleta</strong>
-                      <span>
-                        Apenas coletas aprovadas entram nos gráficos da aba Análise.
-                      </span>
-                      {reviewError ? <em>{reviewError}</em> : null}
-                    </div>
-                    <div className="review-actions">
-                      <button
-                        type="button"
-                        className="review-action edit"
-                        disabled={!onUpdateDeposit || Boolean(updateBusyDepositId)}
-                        onClick={() => openEditDeposit(selectedDeposit)}
-                      >
-                        <Pencil aria-hidden="true" />
-                        Editar
-                      </button>
-                      <button
-                        type="button"
-                        className="review-action approve"
-                        disabled={!onReviewDeposit || isReviewBusy || selectedReviewStatus === "approved"}
-                        onClick={() => reviewSelectedDeposit("approved")}
-                      >
-                        <CheckCircle2 aria-hidden="true" />
-                        Aprovar
-                      </button>
-                      <button
-                        type="button"
-                        className="review-action reject"
-                        disabled={!onReviewDeposit || isReviewBusy || selectedReviewStatus === "rejected"}
-                        onClick={() => reviewSelectedDeposit("rejected")}
-                      >
-                        <XCircle aria-hidden="true" />
-                        Reprovar
-                      </button>
-                      <button
-                        type="button"
-                        className="review-action delete"
-                        disabled={!onDeleteDeposit || isDeleteBusy || selectedReviewStatus !== "rejected"}
-                        onClick={deleteSelectedDeposit}
-                        title={selectedReviewStatus === "rejected" ? "Excluir coleta reprovada" : "Reprove a coleta antes de excluir"}
-                      >
-                        <Trash2 aria-hidden="true" />
-                        Excluir
-                      </button>
-                    </div>
-                  </div>
                   {selectedDeposit.dumpPhotoDataUrl ? (
                     <img
                       className="deposit-photo-preview"
@@ -2817,7 +2834,7 @@ export function Dashboard({
             </article>
           </div>
 
-          <article className="table-panel">
+          <article className="table-panel collection-table-panel">
             <header>
               <div>
                 <h2>Coletas de campo</h2>

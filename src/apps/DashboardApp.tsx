@@ -23,7 +23,13 @@ export function DashboardApp() {
     if (remoteData) {
       setDeposits(remoteData.deposits);
       setScaleTickets(remoteData.scaleTickets);
-      setDataMode(remoteData.source === "dashboard-rpc" ? "Supabase via matricula" : "Supabase conectado");
+      setDataMode(
+        remoteData.source === "dashboard-rpc"
+          ? "Supabase via matricula"
+          : remoteData.source === "mobile-responses"
+            ? "Supabase via coletas"
+            : "Supabase conectado",
+      );
       return;
     }
 
@@ -80,7 +86,7 @@ export function DashboardApp() {
     try {
       const result = await reviewFieldDeposit(user, depositId, status);
       setDeposits((current) => current.map((deposit) => (
-        deposit.id === depositId
+        deposit.id === depositId || deposit.id === result.id
           ? {
               ...deposit,
               reviewStatus: result.reviewStatus,
@@ -103,8 +109,10 @@ export function DashboardApp() {
 
     try {
       const result = await deleteFieldDeposit(user, depositId);
-      setDeposits((current) => current.filter((deposit) => deposit.id !== result.id));
-      setScaleTickets((current) => current.filter((ticket) => ticket.fieldDepositId !== result.id));
+      setDeposits((current) => current.filter((deposit) => deposit.id !== depositId && deposit.id !== result.id));
+      setScaleTickets((current) => current.filter((ticket) => (
+        ticket.fieldDepositId !== depositId && ticket.fieldDepositId !== result.id
+      )));
       await refresh(user);
     } finally {
       setDeleteBusyDepositId(null);
@@ -119,7 +127,7 @@ export function DashboardApp() {
     try {
       const result = await updateFieldDeposit(user, depositId, values);
       setDeposits((current) => current.map((deposit) => (
-        deposit.id === result.id
+        deposit.id === depositId || deposit.id === result.id
           ? {
               ...deposit,
               driverRegistration: result.driverRegistration,
