@@ -1,8 +1,11 @@
 import {
   type FormEvent as ReactFormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
+  useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -70,6 +73,7 @@ interface TicketMaps {
 }
 
 type DashboardView = "geral" | "coletas" | "conciliacao" | "analise";
+const dashboardViewOrder: DashboardView[] = ["geral", "coletas", "conciliacao", "analise"];
 type TicketStatusFilter = "all" | "matched" | "pending";
 type SyncStatusFilter = "all" | SyncStatus;
 type AnalysisFarmFilter = FarmId | "all";
@@ -1532,6 +1536,8 @@ export function Dashboard({
   const [editDepositId, setEditDepositId] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<FieldDepositEditValues | null>(null);
   const [editError, setEditError] = useState("");
+  const editModalRef = useRef<HTMLFormElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   const ticketMaps = useMemo(() => buildTicketMaps(scaleTickets), [scaleTickets]);
   const scopedDeposits = useMemo(
@@ -1836,6 +1842,59 @@ export function Dashboard({
     setEditDepositId(null);
     setEditValues(null);
     setEditError("");
+  };
+
+  useEffect(() => {
+    if (!editValues) return undefined;
+
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    window.requestAnimationFrame(() => editModalRef.current?.focus());
+
+    const handleModalKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeEditDeposit();
+        return;
+      }
+
+      if (event.key !== "Tab" || !editModalRef.current) return;
+      const focusable = Array.from(editModalRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ));
+      if (!focusable.length) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleModalKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleModalKeyDown);
+      previousFocusRef.current?.focus();
+    };
+  }, [editValues]);
+
+  const handleTabKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+
+    const currentIndex = dashboardViewOrder.indexOf(activeView);
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? dashboardViewOrder.length - 1
+        : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + dashboardViewOrder.length) % dashboardViewOrder.length;
+    const nextView = dashboardViewOrder[nextIndex];
+    setActiveView(nextView);
+    if (nextView !== "analise") stopPresentation();
+    window.requestAnimationFrame(() => document.getElementById(`dashboard-tab-${nextView}`)?.focus());
   };
 
   const updateEditValue = <K extends keyof FieldDepositEditValues>(
@@ -2161,8 +2220,14 @@ export function Dashboard({
 
       <div className="dashboard-tabs dashboard-tabs-4" role="tablist" aria-label="Areas do dashboard">
         <button
+          id="dashboard-tab-geral"
           type="button"
+          role="tab"
+          aria-selected={activeView === "geral"}
+          aria-controls="dashboard-panel-geral"
+          tabIndex={activeView === "geral" ? 0 : -1}
           className={activeView === "geral" ? "active" : ""}
+          onKeyDown={handleTabKeyDown}
           onClick={() => {
             setActiveView("geral");
             stopPresentation();
@@ -2172,8 +2237,14 @@ export function Dashboard({
           Geral
         </button>
         <button
+          id="dashboard-tab-coletas"
           type="button"
+          role="tab"
+          aria-selected={activeView === "coletas"}
+          aria-controls="dashboard-panel-coletas"
+          tabIndex={activeView === "coletas" ? 0 : -1}
           className={activeView === "coletas" ? "active" : ""}
+          onKeyDown={handleTabKeyDown}
           onClick={() => {
             setActiveView("coletas");
             stopPresentation();
@@ -2183,23 +2254,35 @@ export function Dashboard({
           Coletas
         </button>
         <button
+          id="dashboard-tab-conciliacao"
           type="button"
+          role="tab"
+          aria-selected={activeView === "conciliacao"}
+          aria-controls="dashboard-panel-conciliacao"
+          tabIndex={activeView === "conciliacao" ? 0 : -1}
           className={activeView === "conciliacao" ? "active" : ""}
+          onKeyDown={handleTabKeyDown}
           onClick={() => {
             setActiveView("conciliacao");
             stopPresentation();
           }}
         >
           <TicketCheck aria-hidden="true" />
-          Conciliacao
+          Conciliação
         </button>
         <button
+          id="dashboard-tab-analise"
           type="button"
+          role="tab"
+          aria-selected={activeView === "analise"}
+          aria-controls="dashboard-panel-analise"
+          tabIndex={activeView === "analise" ? 0 : -1}
           className={activeView === "analise" ? "active" : ""}
+          onKeyDown={handleTabKeyDown}
           onClick={() => setActiveView("analise")}
         >
           <BarChart3 aria-hidden="true" />
-          Analise
+          Análise
         </button>
       </div>
 
@@ -2369,7 +2452,7 @@ export function Dashboard({
       ) : null}
 
       {activeView === "geral" ? (
-        <>
+        <section id="dashboard-panel-geral" role="tabpanel" aria-labelledby="dashboard-tab-geral">
           <div className="executive-grid">
             <article className="collection-panel">
               <header>
@@ -2524,11 +2607,11 @@ export function Dashboard({
               </div>
             </article>
           </div>
-        </>
+        </section>
       ) : null}
 
       {activeView === "coletas" ? (
-        <>
+        <section id="dashboard-panel-coletas" role="tabpanel" aria-labelledby="dashboard-tab-coletas">
           <div className="collection-grid collection-grid-detail collection-review-layout">
             <article className="collection-panel review-summary-panel">
               <header>
@@ -2607,7 +2690,7 @@ export function Dashboard({
                 <table className="review-table">
                   <thead>
                     <tr>
-                      <th className="review-check-col">
+                      <th scope="col" className="review-check-col">
                         <input
                           type="checkbox"
                           aria-label="Selecionar todas as coletas da fila"
@@ -2615,12 +2698,12 @@ export function Dashboard({
                           onChange={toggleAllReviewRows}
                         />
                       </th>
-                      <th>Ticket</th>
-                      <th>Motorista</th>
-                      <th>Destino</th>
-                      <th>Subproduto</th>
-                      <th>Status</th>
-                      <th>Detalhe</th>
+                      <th scope="col">Ticket</th>
+                      <th scope="col">Motorista</th>
+                      <th scope="col">Destino</th>
+                      <th scope="col">Subproduto</th>
+                      <th scope="col">Status</th>
+                      <th scope="col">Detalhe</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2834,22 +2917,22 @@ export function Dashboard({
               </div>
             </header>
             <div className="table-scroll">
-              <table>
+              <table className="responsive-data-table">
                 <thead>
                   <tr>
-                    <th>Data</th>
-                    <th>Ticket</th>
-                    <th>Veiculo</th>
-                    <th>Motorista</th>
-                    <th>Origem</th>
-                    <th>Fazenda</th>
-                    <th>Parcelas</th>
-                    <th>Subproduto</th>
-                    <th>Balanca</th>
-                    <th>GPS</th>
-                    <th>Validação</th>
-                    <th>Sync</th>
-                    <th>Detalhe</th>
+                    <th scope="col">Data</th>
+                    <th scope="col">Ticket</th>
+                    <th scope="col">Veiculo</th>
+                    <th scope="col">Motorista</th>
+                    <th scope="col">Origem</th>
+                    <th scope="col">Fazenda</th>
+                    <th scope="col">Parcelas</th>
+                    <th scope="col">Subproduto</th>
+                    <th scope="col">Balanca</th>
+                    <th scope="col">GPS</th>
+                    <th scope="col">Validação</th>
+                    <th scope="col">Sync</th>
+                    <th scope="col">Detalhe</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2863,36 +2946,36 @@ export function Dashboard({
                           key={deposit.id}
                           className={selectedDeposit?.id === deposit.id ? "selected-row" : ""}
                         >
-                          <td>{formatDate(deposit.depositDate)}</td>
-                          <td>{ticketCode || "-"}</td>
-                          <td>{deposit.vehiclePlate}</td>
-                          <td>{deposit.driverName || deposit.driverRegistration}</td>
-                          <td>{getLoadingOrigin(deposit)}</td>
-                          <td>{deposit.farm}</td>
-                          <td>{formatPlot(deposit)}</td>
-                          <td>{deposit.subproduct}</td>
-                          <td>
+                          <td data-label="Data">{formatDate(deposit.depositDate)}</td>
+                          <td data-label="Ticket">{ticketCode || "-"}</td>
+                          <td data-label="Veiculo">{deposit.vehiclePlate}</td>
+                          <td data-label="Motorista">{deposit.driverName || deposit.driverRegistration}</td>
+                          <td data-label="Origem">{getLoadingOrigin(deposit)}</td>
+                          <td data-label="Fazenda">{deposit.farm}</td>
+                          <td data-label="Parcelas">{formatPlot(deposit)}</td>
+                          <td data-label="Subproduto">{deposit.subproduct}</td>
+                          <td data-label="Balanca">
                             <span className="scale-cell">
                               <strong>{ticket ? formatTonnes(ticket.netWeightKg) : "-"}</strong>
                               <small>{ticket ? formatMinutes(getCycleMinutes(ticket)) : "-"}</small>
                             </span>
                           </td>
-                          <td>
+                          <td data-label="GPS">
                             <span className={`mini-chip ${deposit.latitude && deposit.longitude ? "ok" : "warn"}`}>
                               {deposit.latitude && deposit.longitude ? "GPS" : "Sem GPS"}
                             </span>
                           </td>
-                          <td>
+                          <td data-label="Validacao">
                             <span className={`mini-chip review-${getReviewStatus(deposit)}`}>
                               {reviewLabel(getReviewStatus(deposit))}
                             </span>
                           </td>
-                          <td>
+                          <td data-label="Sync">
                             <span className={`mini-chip sync-${deposit.syncStatus}`}>
                               {syncLabel(deposit.syncStatus)}
                             </span>
                           </td>
-                          <td>
+                          <td data-label="Detalhe">
                             <span className="row-action-group">
                               <button
                                 type="button"
@@ -2927,19 +3010,33 @@ export function Dashboard({
               </table>
             </div>
           </article>
-        </>
+        </section>
       ) : null}
 
       {editValues ? (
-        <div className="deposit-edit-backdrop" role="presentation">
-          <form className="deposit-edit-modal" onSubmit={saveEditDeposit}>
+        <div
+          className="deposit-edit-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeEditDeposit();
+          }}
+        >
+          <form
+            ref={editModalRef}
+            className="deposit-edit-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="deposit-edit-title"
+            tabIndex={-1}
+            onSubmit={saveEditDeposit}
+          >
             <header>
               <div>
                 <span className="panel-kicker">
                   <Pencil aria-hidden="true" />
                   Editar coleta
                 </span>
-                <h2>{editValues.scaleTicketCode || "Coleta sem ticket"}</h2>
+                <h2 id="deposit-edit-title">{editValues.scaleTicketCode || "Coleta sem ticket"}</h2>
               </div>
               <button
                 type="button"
@@ -3110,7 +3207,7 @@ export function Dashboard({
       ) : null}
 
       {activeView === "conciliacao" ? (
-        <>
+        <section id="dashboard-panel-conciliacao" role="tabpanel" aria-labelledby="dashboard-tab-conciliacao">
           <div className="reconciliation-layout">
             <article className="collection-panel">
               <header>
@@ -3202,13 +3299,13 @@ export function Dashboard({
               <table>
                 <thead>
                   <tr>
-                    <th>Data campo</th>
-                    <th>Ticket informado</th>
-                    <th>Placa</th>
-                    <th>Motorista</th>
-                    <th>Destino</th>
-                    <th>Status</th>
-                    <th>Acao sugerida</th>
+                    <th scope="col">Data campo</th>
+                    <th scope="col">Ticket informado</th>
+                    <th scope="col">Placa</th>
+                    <th scope="col">Motorista</th>
+                    <th scope="col">Destino</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Acao sugerida</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3239,11 +3336,16 @@ export function Dashboard({
               </table>
             </div>
           </article>
-        </>
+        </section>
       ) : null}
 
       {activeView === "analise" ? (
-        <section className="analysis-presentation" aria-label="Analise em uma tela">
+        <section
+          id="dashboard-panel-analise"
+          className="analysis-presentation"
+          role="tabpanel"
+          aria-labelledby="dashboard-tab-analise"
+        >
           <article className="chart-panel analysis-filter-card">
             <header>
               <div>
@@ -3521,7 +3623,20 @@ export function Dashboard({
                               const labelFontSize = 7.1 / combinedMapView.scale;
 
                               return (
-                                <g data-farm-id={farmMap.farm.id} key={parcel.id}>
+                                <g
+                                  data-farm-id={farmMap.farm.id}
+                                  key={parcel.id}
+                                  role="button"
+                                  tabIndex={0}
+                                  aria-label={`Parcela ${parcel.label} da fazenda ${farmMap.farm.label}`}
+                                  onClick={() => selectParcelForAnalysis(farmMap.farm, parcel)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                      event.preventDefault();
+                                      selectParcelForAnalysis(farmMap.farm, parcel);
+                                    }
+                                  }}
+                                >
                                   <title>
                                     {`${farmMap.farm.label} · Parcela ${parcel.label} · ${parcel.hectares.toLocaleString("pt-BR", {
                                       maximumFractionDigits: 1,
@@ -3581,6 +3696,9 @@ export function Dashboard({
                             {farmMap.markers.map((marker) => (
                               <g
                                 key={marker.id}
+                                role="button"
+                                tabIndex={0}
+                                aria-label={`${marker.deposit.farm}, ${marker.plotLabel}, ${marker.deposit.subproduct}, ${marker.modeLabel}`}
                                 className={`geo-marker ${
                                   marker.deposit.placementMode === "between_plots"
                                     ? "geo-marker-between"
@@ -3592,6 +3710,14 @@ export function Dashboard({
                                 transform={`translate(${marker.x} ${marker.y})`}
                                 onClick={(event) => {
                                   event.stopPropagation();
+                                  setSelectedDepositId(marker.id);
+                                  setSelectedDriverKey(getDriverKey(marker.deposit));
+                                  setSelectedFarmId(farmMap.farm.id);
+                                  setSelectedParcel(null);
+                                }}
+                                onKeyDown={(event) => {
+                                  if (event.key !== "Enter" && event.key !== " ") return;
+                                  event.preventDefault();
                                   setSelectedDepositId(marker.id);
                                   setSelectedDriverKey(getDriverKey(marker.deposit));
                                   setSelectedFarmId(farmMap.farm.id);

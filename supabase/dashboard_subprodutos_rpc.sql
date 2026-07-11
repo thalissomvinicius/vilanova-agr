@@ -127,6 +127,7 @@ as $$
 declare
   v_actor record;
   v_deleted_id uuid;
+  v_source_response_id text;
 begin
   select *
   into v_actor
@@ -141,6 +142,12 @@ begin
   set field_deposit_id = null
   where field_deposit_id = p_deposit_id;
 
+  select fd.source_response_id
+  into v_source_response_id
+  from public.field_deposits fd
+  where fd.id = p_deposit_id
+    and fd.review_status = 'rejected';
+
   delete from public.field_deposits fd
   where fd.id = p_deposit_id
     and fd.review_status = 'rejected'
@@ -148,6 +155,26 @@ begin
 
   if v_deleted_id is null then
     raise exception 'Coleta nao encontrada ou ainda nao reprovada.';
+  end if;
+
+  if v_source_response_id is not null then
+    insert into public.field_deposit_tombstones (
+      source_response_id,
+      field_deposit_id,
+      deleted_at,
+      deleted_by,
+      reason
+    ) values (
+      v_source_response_id,
+      v_deleted_id,
+      now(),
+      concat_ws(' ', nullif(v_actor.nome, ''), concat('(', v_actor.matricula, ')')),
+      'Excluida no dashboard depois de reprovada'
+    ) on conflict (source_response_id) do update set
+      field_deposit_id = excluded.field_deposit_id,
+      deleted_at = excluded.deleted_at,
+      deleted_by = excluded.deleted_by,
+      reason = excluded.reason;
   end if;
 
   return query select v_deleted_id;
@@ -246,6 +273,7 @@ begin
     longitude = nullif(trim(coalesce(p_patch->>'longitude', '')), '')::numeric,
     location_accuracy = nullif(trim(coalesce(p_patch->>'location_accuracy', '')), '')::numeric,
     notes = nullif(trim(coalesce(p_patch->>'notes', '')), ''),
+    source_updated_at = now(),
     updated_at = now()
   where fd.id = p_deposit_id
   returning

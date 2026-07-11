@@ -2,7 +2,10 @@
 -- Rode este arquivo no SQL Editor do Supabase depois de `schema.sql`.
 
 alter table public.field_deposits
-  add column if not exists source_response_id text;
+  add column if not exists source_response_id text,
+  add column if not exists source_updated_at timestamptz,
+  add column if not exists payload_hash text,
+  add column if not exists dump_photo_storage_path text;
 
 create index if not exists field_deposits_source_response_idx
   on public.field_deposits (source_response_id);
@@ -89,6 +92,7 @@ begin
         else null
       end as location_accuracy,
       nullif(trim(row_data->>'dump_photo_data_url'), '') as dump_photo_data_url,
+      nullif(trim(row_data->>'dump_photo_storage_path'), '') as dump_photo_storage_path,
       nullif(trim(row_data->>'dump_photo_name'), '') as dump_photo_name,
       case
         when trim(coalesce(row_data->>'dump_photo_latitude', '')) ~ '^-?\d+(\.\d+)?$'
@@ -113,18 +117,30 @@ begin
       nullif(trim(row_data->>'notes'), '') as notes,
       coalesce(nullif(trim(row_data->>'created_at'), '')::timestamptz, now()) as created_at,
       coalesce(nullif(trim(row_data->>'updated_at'), '')::timestamptz, now()) as updated_at,
-      coalesce(nullif(trim(row_data->>'client_synced_at'), '')::timestamptz, now()) as client_synced_at
+      coalesce(nullif(trim(row_data->>'client_synced_at'), '')::timestamptz, now()) as client_synced_at,
+      coalesce(
+        nullif(trim(row_data->>'source_updated_at'), '')::timestamptz,
+        nullif(trim(row_data->>'updated_at'), '')::timestamptz,
+        nullif(trim(row_data->>'created_at'), '')::timestamptz,
+        now()
+      ) as source_updated_at,
+      md5(row_data::text) as payload_hash
     from raw_rows
   ),
   valid_rows as (
-    select *
+    select normalized.*
     from normalized
-    where source_response_id is not null
-      and driver_registration is not null
-      and vehicle_plate is not null
-      and subproduct is not null
-      and farm is not null
-      and plot_primary is not null
+    where normalized.source_response_id is not null
+      and normalized.driver_registration is not null
+      and normalized.vehicle_plate is not null
+      and normalized.subproduct is not null
+      and normalized.farm is not null
+      and normalized.plot_primary is not null
+      and not exists (
+        select 1
+        from public.field_deposit_tombstones tombstone
+        where tombstone.source_response_id = normalized.source_response_id
+      )
   ),
   upserted as (
     insert into public.field_deposits (
@@ -146,6 +162,7 @@ begin
       longitude,
       location_accuracy,
       dump_photo_data_url,
+      dump_photo_storage_path,
       dump_photo_name,
       dump_photo_latitude,
       dump_photo_longitude,
@@ -155,6 +172,8 @@ begin
       created_at,
       updated_at,
       client_synced_at,
+      source_updated_at,
+      payload_hash,
       review_status
     )
     select
@@ -176,6 +195,7 @@ begin
       longitude,
       location_accuracy,
       dump_photo_data_url,
+      dump_photo_storage_path,
       dump_photo_name,
       dump_photo_latitude,
       dump_photo_longitude,
@@ -185,6 +205,8 @@ begin
       created_at,
       updated_at,
       client_synced_at,
+      source_updated_at,
+      payload_hash,
       'pending'
     from valid_rows
     on conflict (id) do update
@@ -206,6 +228,7 @@ begin
       longitude = excluded.longitude,
       location_accuracy = excluded.location_accuracy,
       dump_photo_data_url = excluded.dump_photo_data_url,
+      dump_photo_storage_path = excluded.dump_photo_storage_path,
       dump_photo_name = excluded.dump_photo_name,
       dump_photo_latitude = excluded.dump_photo_latitude,
       dump_photo_longitude = excluded.dump_photo_longitude,
@@ -213,7 +236,10 @@ begin
       dump_photo_captured_at = excluded.dump_photo_captured_at,
       notes = excluded.notes,
       updated_at = excluded.updated_at,
-      client_synced_at = excluded.client_synced_at
+      client_synced_at = excluded.client_synced_at,
+      source_updated_at = excluded.source_updated_at,
+      payload_hash = excluded.payload_hash
+    where excluded.source_updated_at >= coalesce(public.field_deposits.source_updated_at, '-infinity'::timestamptz)
     returning 1
   )
   select count(*)
@@ -232,7 +258,8 @@ revoke all on function public.mobile_subproduct_uuid(text) from public;
 grant execute on function public.mobile_subproduct_uuid(text) to anon, authenticated;
 
 revoke all on function public.mobile_sync_subproduct_deposits(jsonb) from public;
-grant execute on function public.mobile_sync_subproduct_deposits(jsonb) to anon, authenticated;
+revoke all on function public.mobile_sync_subproduct_deposits(jsonb) from anon, authenticated;
+grant execute on function public.mobile_sync_subproduct_deposits(jsonb) to service_role;
 
 comment on function public.mobile_sync_subproduct_deposits(jsonb) is
   'Receives subproduct unload records from the offline mobile app and upserts them into field_deposits for dashboard review.';

@@ -183,6 +183,25 @@ button:disabled {
   font-size: 0.9rem;
 }
 
+.rail-status > span:last-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.rail-status small {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.72rem;
+}
+
+.spin {
+  animation: dashboard-spin 0.9s linear infinite;
+}
+
+@keyframes dashboard-spin {
+  to { transform: rotate(360deg); }
+}
+
 .rail-user-card {
   margin-top: auto;
   width: 100%;
@@ -247,6 +266,30 @@ button:disabled {
   max-width: 1440px;
   padding: 28px;
   margin: 0 auto;
+}
+
+.dashboard-error {
+  margin-bottom: 12px;
+  border: 1px solid rgba(200, 67, 15, 0.28);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff5ef;
+  color: #8e3516;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-weight: 800;
+}
+
+.dashboard-error button {
+  min-height: 34px;
+  border: 1px solid rgba(200, 67, 15, 0.28);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: #ffffff;
+  color: inherit;
+  font-weight: 850;
 }
 
 .surface-heading {
@@ -2432,8 +2475,17 @@ tr.selected-row td {
   display: block;
 }
 
-.geo-map-canvas svg *:focus {
+.geo-map-canvas svg g[role="button"]:focus-visible {
   outline: none;
+}
+
+.geo-map-canvas svg g[role="button"]:focus-visible .geo-parcel-real {
+  stroke: #0c4f34;
+  stroke-width: 2.5;
+}
+
+.geo-map-canvas svg .geo-marker:focus-visible {
+  filter: drop-shadow(0 0 4px #ffffff) drop-shadow(0 0 3px #0c4f34);
 }
 
 .geo-map-canvas.is-dragging,
@@ -4683,6 +4735,72 @@ tr.selected-row td {
 }
 
 @media (max-width: 620px) {
+  .collection-table-panel .table-scroll {
+    overflow: visible;
+  }
+
+  .collection-table-panel .responsive-data-table {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .responsive-data-table thead {
+    display: none;
+  }
+
+  .responsive-data-table tbody,
+  .responsive-data-table tr,
+  .responsive-data-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .responsive-data-table tr {
+    margin-bottom: 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: #ffffff;
+  }
+
+  .responsive-data-table td {
+    min-height: 34px;
+    border-bottom: 1px solid rgba(31, 83, 57, 0.1);
+    padding: 7px 0;
+    white-space: normal;
+    display: grid;
+    grid-template-columns: minmax(84px, 0.42fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    text-align: right;
+  }
+
+  .responsive-data-table td::before {
+    content: attr(data-label);
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 850;
+    text-align: left;
+    text-transform: uppercase;
+  }
+
+  .responsive-data-table td:last-child {
+    border-bottom: 0;
+  }
+
+  .responsive-data-table .row-action-group {
+    justify-content: flex-end;
+  }
+
+  .responsive-data-table .empty-table-cell {
+    display: block;
+    text-align: center;
+  }
+
+  .responsive-data-table .empty-table-cell::before {
+    content: none;
+  }
+
   .dashboard-heading {
     align-items: stretch;
     flex-direction: column;

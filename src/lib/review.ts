@@ -34,17 +34,6 @@ function mapReviewResult(row: Record<string, unknown>, fallbackStatus: ReviewSta
   };
 }
 
-function isMissingRpcError(error: unknown) {
-  const message = error instanceof Error
-    ? error.message
-    : String((error as { message?: unknown } | null)?.message || error || "");
-
-  return message.includes("PGRST202")
-    || message.toLowerCase().includes("could not find the function")
-    || message.toLowerCase().includes("function public.dashboard_delete_subproduct_deposit")
-    || message.toLowerCase().includes("function public.dashboard_update_subproduct_deposit");
-}
-
 function text(value: unknown, fallback = "") {
   if (value === null || value === undefined) return fallback;
   return String(value).trim() || fallback;
@@ -100,19 +89,6 @@ function toDatabasePatch(values: FieldDepositEditValues) {
   };
 }
 
-async function resolveFieldDepositId(depositId: string) {
-  if (!depositId.startsWith("mobile:")) return depositId;
-  if (!supabase) return depositId;
-
-  const sourceResponseId = depositId.slice("mobile:".length);
-  const { data, error } = await supabase.rpc("mobile_subproduct_uuid", {
-    p_source_response_id: sourceResponseId,
-  });
-
-  if (error) throw error;
-  return String(data || depositId);
-}
-
 async function reviewBySessionRpc(
   user: DashboardUser,
   depositId: string,
@@ -134,33 +110,6 @@ async function reviewBySessionRpc(
   return row && typeof row === "object" ? mapReviewResult(row as Record<string, unknown>, status) : null;
 }
 
-async function reviewBySupabaseAuth(
-  user: DashboardUser,
-  depositId: string,
-  status: ReviewStatus,
-  notes: string | null,
-) {
-  if (!supabase) return null;
-
-  const reviewedAt = status === "pending" ? null : new Date().toISOString();
-  const reviewedByLabel = status === "pending" ? null : `${user.nome} (${user.matricula})`;
-
-  const { data, error } = await supabase
-    .from("field_deposits")
-    .update({
-      review_status: status,
-      review_notes: notes,
-      reviewed_at: reviewedAt,
-      reviewed_by_label: reviewedByLabel,
-    })
-    .eq("id", depositId)
-    .select("id, review_status, review_notes, reviewed_at, reviewed_by_label")
-    .single();
-
-  if (error) throw error;
-  return data ? mapReviewResult(data as Record<string, unknown>, status) : null;
-}
-
 export async function reviewFieldDeposit(
   user: DashboardUser,
   depositId: string,
@@ -171,18 +120,8 @@ export async function reviewFieldDeposit(
     throw new Error("Supabase nao configurado.");
   }
 
-  const resolvedDepositId = await resolveFieldDepositId(depositId);
-
-  if (user.sessionToken) {
-    try {
-      const result = await reviewBySessionRpc(user, resolvedDepositId, status, notes);
-      if (result) return result;
-    } catch {
-      // Projects without the dashboard RPC use the native Supabase Auth path below.
-    }
-  }
-
-  const result = await reviewBySupabaseAuth(user, resolvedDepositId, status, notes);
+  if (!user.sessionToken) throw new Error("Sessao segura do dashboard ausente.");
+  const result = await reviewBySessionRpc(user, depositId, status, notes);
   if (!result) throw new Error("Nao foi possivel atualizar a validacao da coleta.");
   return result;
 }
@@ -205,27 +144,6 @@ async function deleteBySessionRpc(user: DashboardUser, depositId: string) {
   };
 }
 
-async function deleteBySupabaseAuth(depositId: string) {
-  if (!supabase) return null;
-
-  const linkResult = await supabase
-    .from("scale_tickets")
-    .update({ field_deposit_id: null })
-    .eq("field_deposit_id", depositId);
-
-  if (linkResult.error) throw linkResult.error;
-
-  const { data, error } = await supabase
-    .from("field_deposits")
-    .delete()
-    .eq("id", depositId)
-    .select("id")
-    .single();
-
-  if (error) throw error;
-  return data ? { id: String((data as Record<string, unknown>).id || depositId) } : null;
-}
-
 export async function deleteFieldDeposit(
   user: DashboardUser,
   depositId: string,
@@ -234,19 +152,8 @@ export async function deleteFieldDeposit(
     throw new Error("Supabase nao configurado.");
   }
 
-  const resolvedDepositId = await resolveFieldDepositId(depositId);
-
-  if (user.sessionToken) {
-    try {
-      const result = await deleteBySessionRpc(user, resolvedDepositId);
-      if (result) return result;
-    } catch (error) {
-      if (!isMissingRpcError(error)) throw error;
-      // Projects without the delete RPC use the native Supabase Auth path below.
-    }
-  }
-
-  const result = await deleteBySupabaseAuth(resolvedDepositId);
+  if (!user.sessionToken) throw new Error("Sessao segura do dashboard ausente.");
+  const result = await deleteBySessionRpc(user, depositId);
   if (!result) throw new Error("Nao foi possivel excluir a coleta.");
   return result;
 }
@@ -272,45 +179,6 @@ async function updateBySessionRpc(
     : null;
 }
 
-async function updateBySupabaseAuth(
-  depositId: string,
-  values: FieldDepositEditValues,
-) {
-  if (!supabase) return null;
-
-  const { data, error } = await supabase
-    .from("field_deposits")
-    .update({
-      ...toDatabasePatch(values),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", depositId)
-    .select(`
-      id,
-      driver_registration,
-      driver_name,
-      vehicle_plate,
-      subproduct,
-      loading_origin,
-      scale_ticket_code,
-      farm,
-      placement_mode,
-      plot_primary,
-      plot_secondary,
-      deposit_date,
-      deposit_time,
-      latitude,
-      longitude,
-      location_accuracy,
-      notes,
-      updated_at
-    `)
-    .single();
-
-  if (error) throw error;
-  return data ? mapUpdateResult(data as Record<string, unknown>, values) : null;
-}
-
 export async function updateFieldDeposit(
   user: DashboardUser,
   depositId: string,
@@ -320,19 +188,8 @@ export async function updateFieldDeposit(
     throw new Error("Supabase nao configurado.");
   }
 
-  const resolvedDepositId = await resolveFieldDepositId(depositId);
-
-  if (user.sessionToken) {
-    try {
-      const result = await updateBySessionRpc(user, resolvedDepositId, values);
-      if (result) return result;
-    } catch (error) {
-      if (!isMissingRpcError(error)) throw error;
-      // Projects without the update RPC use the native Supabase Auth path below.
-    }
-  }
-
-  const result = await updateBySupabaseAuth(resolvedDepositId, values);
+  if (!user.sessionToken) throw new Error("Sessao segura do dashboard ausente.");
+  const result = await updateBySessionRpc(user, depositId, values);
   if (!result) throw new Error("Nao foi possivel editar a coleta.");
   return result;
 }

@@ -13,29 +13,32 @@ export function DashboardApp() {
   const [scaleTickets, setScaleTickets] = useState<ScaleTicket[]>([]);
   const [loading, setLoading] = useState(true);
   const [dataMode, setDataMode] = useState("Aguardando Supabase");
+  const [loadError, setLoadError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [reviewBusyDepositId, setReviewBusyDepositId] = useState<string | null>(null);
   const [deleteBusyDepositId, setDeleteBusyDepositId] = useState<string | null>(null);
   const [updateBusyDepositId, setUpdateBusyDepositId] = useState<string | null>(null);
 
   const refresh = useCallback(async (profile: DashboardUser) => {
-    const remoteData = await loadRemoteDashboardData(profile);
-
-    if (remoteData) {
+    setRefreshing(true);
+    try {
+      const remoteData = await loadRemoteDashboardData(profile);
       setDeposits(remoteData.deposits);
       setScaleTickets(remoteData.scaleTickets);
       setDataMode(
         remoteData.source === "dashboard-rpc"
           ? "Supabase via matricula"
-          : remoteData.source === "mobile-responses"
-            ? "Supabase via coletas"
-            : "Supabase conectado",
+          : "Supabase conectado",
       );
-      return;
+      setLoadError("");
+      setLastUpdatedAt(new Date());
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Falha ao carregar os dados do Supabase.");
+      setDataMode("Falha de conexao");
+    } finally {
+      setRefreshing(false);
     }
-
-    setDeposits([]);
-    setScaleTickets([]);
-    setDataMode("Supabase sem registros");
   }, []);
 
   useEffect(() => {
@@ -62,11 +65,24 @@ export function DashboardApp() {
     };
   }, [refresh]);
 
+  useEffect(() => {
+    if (!user) return undefined;
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refresh(user);
+    }, 45_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [refresh, user]);
+
   const handleLogin = async (profile: DashboardUser) => {
     setUser(profile);
     setLoading(true);
-    await refresh(profile);
-    setLoading(false);
+    try {
+      await refresh(profile);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleLogout = async () => {
@@ -174,6 +190,12 @@ export function DashboardApp() {
             Painel
           </a>
           {user ? (
+            <button type="button" onClick={() => void refresh(user)} disabled={refreshing}>
+              <RefreshCw aria-hidden="true" className={refreshing ? "spin" : ""} />
+              Atualizar
+            </button>
+          ) : null}
+          {user ? (
             <button type="button" onClick={handleLogout}>
               <LogOut aria-hidden="true" />
               Sair
@@ -193,11 +215,20 @@ export function DashboardApp() {
 
         <div className="rail-status">
           <span className="dot online" />
-          {dataMode}
+          <span>
+            {dataMode}
+            {lastUpdatedAt ? <small>Atualizado {lastUpdatedAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</small> : null}
+          </span>
         </div>
       </aside>
 
       <section className="main-region dashboard-region">
+        {loadError ? (
+          <div className="dashboard-error" role="alert">
+            <span>{loadError}</span>
+            {user ? <button type="button" onClick={() => void refresh(user)}>Tentar novamente</button> : null}
+          </div>
+        ) : null}
         {loading ? (
           <div className="loading-state">
             <RefreshCw aria-hidden="true" />

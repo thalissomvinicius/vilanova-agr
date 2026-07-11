@@ -1,5 +1,4 @@
-import type { User } from "@supabase/supabase-js";
-import { getCurrentSession, supabase, supabaseAuthEmailFromLogin, supabaseConfigured } from "./supabase";
+import { supabase, supabaseConfigured } from "./supabase";
 
 const DASHBOARD_PROFILE_KEY = "vna-subprodutos-dashboard-profile";
 const LOCAL_DEMO_SESSION_TOKEN = "local-demo-subprodutos-session";
@@ -17,14 +16,15 @@ export interface DashboardUser {
   sessionToken: string | null;
   sessionExpiresAt: string | null;
   email?: string | null;
-  authProvider: "rpc" | "supabase" | "demo";
+  authProvider: "rpc" | "demo";
 }
 
 function storedProfile() {
   if (typeof window === "undefined") return null;
 
   try {
-    const raw = window.localStorage.getItem(DASHBOARD_PROFILE_KEY);
+    const raw = window.sessionStorage.getItem(DASHBOARD_PROFILE_KEY);
+    window.localStorage.removeItem(DASHBOARD_PROFILE_KEY);
     return raw ? (JSON.parse(raw) as DashboardUser) : null;
   } catch {
     return null;
@@ -35,11 +35,12 @@ function saveProfile(profile: DashboardUser | null) {
   if (typeof window === "undefined") return;
 
   if (!profile) {
+    window.sessionStorage.removeItem(DASHBOARD_PROFILE_KEY);
     window.localStorage.removeItem(DASHBOARD_PROFILE_KEY);
     return;
   }
 
-  window.localStorage.setItem(DASHBOARD_PROFILE_KEY, JSON.stringify(profile));
+  window.sessionStorage.setItem(DASHBOARD_PROFILE_KEY, JSON.stringify(profile));
 }
 
 function firstRpcRow(payload: unknown) {
@@ -76,25 +77,6 @@ function normalizeProfile(row: unknown, fallbackMatricula: string, provider: Das
     email: source.email ? String(source.email) : null,
     authProvider: provider,
   } satisfies DashboardUser;
-}
-
-function profileFromSupabaseUser(user: User, fallbackMatricula: string) {
-  const metadata = user.user_metadata || {};
-  return normalizeProfile(
-    {
-      matricula: metadata.matricula || metadata.registration || fallbackMatricula,
-      nome: metadata.nome || metadata.name || metadata.full_name || user.email,
-      departamento: metadata.departamento,
-      cargo: metadata.cargo,
-      gestor: metadata.gestor,
-      status: metadata.status,
-      role: metadata.role || "viewer",
-      permissions: metadata.permissions || [],
-      email: user.email,
-    },
-    fallbackMatricula,
-    "supabase",
-  );
 }
 
 function buildLocalDemoProfile(matricula: string) {
@@ -154,20 +136,6 @@ async function authenticateByRpc(matricula: string, senha: string) {
   return profile;
 }
 
-async function authenticateBySupabaseAuth(matricula: string, senha: string) {
-  if (!supabase) return null;
-
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: supabaseAuthEmailFromLogin(matricula),
-    password: senha,
-  });
-
-  if (error) throw error;
-  if (!data.user) return null;
-
-  return profileFromSupabaseUser(data.user, matricula);
-}
-
 export async function authenticateDashboardUser(matricula: string, senha: string) {
   const { normalizedMatricula, normalizedSenha } = validateLoginInput(matricula, senha);
 
@@ -188,19 +156,13 @@ export async function authenticateDashboardUser(matricula: string, senha: string
       return rpcProfile;
     }
   } catch (error) {
-    if (!isMissingRpc(error)) {
-      throw error;
+    if (isMissingRpc(error)) {
+      throw new Error("Login seguro por matricula ainda nao instalado no Supabase.");
     }
+    throw error;
   }
 
-  const authProfile = await authenticateBySupabaseAuth(normalizedMatricula, normalizedSenha);
-
-  if (!authProfile) {
-    throw new Error("Matricula ou senha invalida.");
-  }
-
-  saveProfile(authProfile);
-  return authProfile;
+  throw new Error("Matricula ou senha invalida.");
 }
 
 export async function refreshDashboardSession() {
@@ -226,13 +188,6 @@ export async function refreshDashboardSession() {
     }
   }
 
-  const session = await getCurrentSession();
-  if (session?.user) {
-    const profile = profileFromSupabaseUser(session.user, saved?.matricula || "");
-    saveProfile(profile);
-    return profile;
-  }
-
   saveProfile(null);
   return null;
 }
@@ -244,10 +199,6 @@ export async function logoutDashboardUser(profile?: DashboardUser | null) {
     } catch {
       // Logout local still needs to continue if the remote session was already expired.
     }
-  }
-
-  if (supabase) {
-    await supabase.auth.signOut().catch(() => undefined);
   }
 
   saveProfile(null);

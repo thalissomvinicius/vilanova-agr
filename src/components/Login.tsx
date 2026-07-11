@@ -125,11 +125,12 @@ export function Login({ onLogin }: LoginProps) {
             <p>Use a matrícula e senha autorizadas no headcount/Supabase.</p>
           </div>
 
-          <label className="auth-field">
-            <span>Matrícula</span>
+          <div className="auth-field">
+            <label htmlFor="dashboard-matricula">Matrícula</label>
             <div>
               <UserRound aria-hidden="true" />
               <input
+                id="dashboard-matricula"
                 value={matricula}
                 onChange={(event) => setMatricula(event.target.value)}
                 inputMode="numeric"
@@ -138,13 +139,14 @@ export function Login({ onLogin }: LoginProps) {
                 required
               />
             </div>
-          </label>
+          </div>
 
-          <label className="auth-field">
-            <span>Senha</span>
+          <div className="auth-field">
+            <label htmlFor="dashboard-senha">Senha</label>
             <div>
               <LockKeyhole aria-hidden="true" />
               <input
+                id="dashboard-senha"
                 value={senha}
                 onChange={(event) => setSenha(event.target.value)}
                 type={showPassword ? "text" : "password"}
@@ -161,7 +163,7 @@ export function Login({ onLogin }: LoginProps) {
                 {showPassword ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
               </button>
             </div>
-          </label>
+          </div>
 
           {!supabaseConfig.isConfigured ? (
             <div className="auth-error auth-warning" role="status">

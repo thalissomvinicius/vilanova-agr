@@ -18,6 +18,7 @@ create table if not exists public.field_deposits (
   longitude numeric,
   location_accuracy numeric,
   dump_photo_data_url text,
+  dump_photo_storage_path text,
   dump_photo_name text,
   dump_photo_latitude numeric,
   dump_photo_longitude numeric,
@@ -65,11 +66,20 @@ create table if not exists public.scale_tickets (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.field_deposit_tombstones (
+  source_response_id text primary key,
+  field_deposit_id uuid,
+  deleted_at timestamptz not null default now(),
+  deleted_by text,
+  reason text
+);
+
 alter table public.field_deposits
   add column if not exists loading_origin text;
 
 alter table public.field_deposits
   add column if not exists dump_photo_data_url text,
+  add column if not exists dump_photo_storage_path text,
   add column if not exists dump_photo_name text,
   add column if not exists dump_photo_latitude numeric,
   add column if not exists dump_photo_longitude numeric,
@@ -180,6 +190,7 @@ select
   fd.longitude,
   fd.location_accuracy,
   fd.dump_photo_data_url,
+  fd.dump_photo_storage_path,
   fd.dump_photo_name,
   fd.dump_photo_latitude,
   fd.dump_photo_longitude,
