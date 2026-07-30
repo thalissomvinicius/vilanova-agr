@@ -1871,6 +1871,32 @@ body.login-active {
   box-shadow: 0 0 0 2px #ffffff, 0 0 0 3px rgba(20, 57, 37, 0.12);
 }
 
+.operations-map-legend .operations-map-street-key i {
+  width: 15px;
+  height: 3px;
+  border-radius: 999px;
+  background: #b7a16d;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.88);
+}
+
+.operations-map-street-popup {
+  display: grid;
+  gap: 3px;
+  min-width: 150px;
+  color: #183d2b;
+}
+
+.operations-map-street-popup strong {
+  font-size: 0.78rem;
+}
+
+.operations-map-street-popup span,
+.operations-map-street-popup em {
+  color: #66786e;
+  font-size: 0.68rem;
+  font-style: normal;
+}
+
 .operations-map-selection {
   right: 14px;
   bottom: 50px;

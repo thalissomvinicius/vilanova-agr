@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import farmBoundariesGeoJson from "../data/farm-boundaries.json";
 import farmParcelsGeoJson from "../data/farm-parcels.json";
+import interparcelStreetsGeoJson from "../data/interparcel-streets.json";
 import type { FieldDeposit } from "../types";
 
 type FarmScope = "all" | "vila-nova" | "fe-em-deus";
@@ -33,7 +34,7 @@ interface MapFeature {
   id?: string;
   properties: Record<string, unknown>;
   geometry: {
-    type: "Point" | "Polygon" | "MultiPolygon";
+    type: "Point" | "LineString" | "MultiLineString" | "Polygon" | "MultiPolygon";
     coordinates: unknown;
   };
 }
@@ -56,6 +57,7 @@ const mapCenter: Coordinate = [-48.22, -2.86];
 const sourceIds = {
   boundaries: "vna-farm-boundaries",
   parcels: "vna-parcels",
+  streets: "vna-interparcel-streets",
   discharges: "vna-discharges",
   basemap: "vna-basemap",
 };
@@ -66,6 +68,8 @@ const operationalLayerIds = {
   fill: "vna-parcels-fill",
   outlineGlow: "vna-parcels-outline-glow",
   outline: "vna-parcels-outline",
+  streetCasing: "vna-interparcel-streets-casing",
+  streetLine: "vna-interparcel-streets-line",
   boundaryHalo: "vna-farm-boundaries-halo",
   boundaryLine: "vna-farm-boundaries-line",
   parcelLabels: "vna-parcels-labels",
@@ -126,6 +130,8 @@ const operationalLayerOrder = [
   operationalLayerIds.fill,
   operationalLayerIds.outlineGlow,
   operationalLayerIds.outline,
+  operationalLayerIds.streetCasing,
+  operationalLayerIds.streetLine,
   operationalLayerIds.boundaryHalo,
   operationalLayerIds.boundaryLine,
   operationalLayerIds.parcelLabels,
@@ -156,6 +162,11 @@ function normalizeParcel(value: unknown) {
 
 function parcelLabelImageId(value: unknown) {
   return `vna-parcel-label-${normalizeParcel(value).toLowerCase()}`;
+}
+
+function streetPairKey(farmId: unknown, firstParcel: unknown, secondParcel: unknown) {
+  const parcels = [normalizeParcel(firstParcel), normalizeParcel(secondParcel)].sort();
+  return `${String(farmId || "")}:${parcels[0] || ""}:${parcels[1] || ""}`;
 }
 
 function ensureParcelLabelImages(map: MapLibreMap, parcels: MapFeatureCollection) {
@@ -301,6 +312,8 @@ function setParcelFarmFilter(map: MapLibreMap, farmScope: FarmScope) {
     operationalLayerIds.fill,
     operationalLayerIds.outlineGlow,
     operationalLayerIds.outline,
+    operationalLayerIds.streetCasing,
+    operationalLayerIds.streetLine,
     operationalLayerIds.boundaryHalo,
     operationalLayerIds.boundaryLine,
     operationalLayerIds.parcelLabels,
@@ -313,6 +326,7 @@ function addOperationalLayers(
   map: MapLibreMap,
   boundaries: MapFeatureCollection,
   parcels: MapFeatureCollection,
+  streets: MapFeatureCollection,
   markers: MapFeatureCollection,
   showHeat: boolean,
   show3d: boolean,
@@ -324,6 +338,10 @@ function addOperationalLayers(
   map.addSource(sourceIds.parcels, {
     type: "geojson",
     data: parcels as never,
+  });
+  map.addSource(sourceIds.streets, {
+    type: "geojson",
+    data: streets as never,
   });
   map.addSource(sourceIds.discharges, {
     type: "geojson",
@@ -450,6 +468,52 @@ function addOperationalLayers(
         0.65,
       ],
       "line-opacity": 0.9,
+    },
+  });
+  map.addLayer({
+    id: operationalLayerIds.streetCasing,
+    type: "line",
+    source: sourceIds.streets,
+    minzoom: 10,
+    paint: {
+      "line-color": "rgba(255,248,224,0.86)",
+      "line-width": [
+        "case",
+        ["boolean", ["get", "selected"], false], 5.2,
+        ["interpolate", ["linear"], ["zoom"], 10, 2.8, 13, 4.5, 16, 6],
+      ],
+      "line-opacity": [
+        "case",
+        ["boolean", ["get", "selected"], false], 0.92,
+        0.68,
+      ],
+      "line-blur": 0.2,
+    },
+  });
+  map.addLayer({
+    id: operationalLayerIds.streetLine,
+    type: "line",
+    source: sourceIds.streets,
+    minzoom: 10,
+    paint: {
+      "line-color": [
+        "case",
+        ["boolean", ["get", "selected"], false], "#e27a22",
+        [">", ["number", ["get", "depositCount"], 0], 0], "#d49a31",
+        "#d6ad55",
+      ],
+      "line-width": [
+        "case",
+        ["boolean", ["get", "selected"], false], 2.8,
+        ["interpolate", ["linear"], ["zoom"], 10, 1.15, 13, 1.8, 16, 2.8],
+      ],
+      "line-opacity": [
+        "case",
+        ["boolean", ["get", "selected"], false], 1,
+        [">", ["number", ["get", "depositCount"], 0], 0], 0.9,
+        0.92,
+      ],
+      "line-dasharray": [2.2, 1.4],
     },
   });
   map.addLayer({
@@ -589,6 +653,8 @@ export function OperationsMap({
     visibleBoundaries: MapFeatureCollection;
     parcels: MapFeatureCollection;
     visibleParcels: MapFeatureCollection;
+    streets: MapFeatureCollection;
+    visibleStreets: MapFeatureCollection;
     markers: MapFeatureCollection;
     farmScope: FarmScope;
   } | null>(null);
@@ -660,6 +726,48 @@ export function OperationsMap({
     ),
   }), [farmScope, parcelData]);
 
+  const streetData = useMemo<MapFeatureCollection>(() => {
+    const depositsByStreet = new Map<string, { count: number; selected: boolean }>();
+    deposits.forEach((deposit) => {
+      const farmId = farmIdFromName(deposit.farm);
+      if (!farmId || !deposit.plotPrimary || !deposit.plotSecondary) return;
+      const key = streetPairKey(farmId, deposit.plotPrimary, deposit.plotSecondary);
+      const current = depositsByStreet.get(key) || { count: 0, selected: false };
+      depositsByStreet.set(key, {
+        count: current.count + 1,
+        selected: current.selected || deposit.id === selectedDepositId,
+      });
+    });
+
+    const source = interparcelStreetsGeoJson as unknown as MapFeatureCollection;
+    return {
+      type: "FeatureCollection",
+      features: source.features.map((feature) => {
+        const streetStats = depositsByStreet.get(streetPairKey(
+          feature.properties.farmId,
+          feature.properties.parcelA,
+          feature.properties.parcelB,
+        )) || { count: 0, selected: false };
+
+        return {
+          ...feature,
+          properties: {
+            ...feature.properties,
+            depositCount: streetStats.count,
+            selected: streetStats.selected,
+          },
+        };
+      }),
+    };
+  }, [deposits, selectedDepositId]);
+
+  const visibleStreetData = useMemo<MapFeatureCollection>(() => ({
+    type: "FeatureCollection",
+    features: streetData.features.filter(
+      (feature) => farmScope === "all" || feature.properties.farmId === farmScope,
+    ),
+  }), [farmScope, streetData]);
+
   const markerData = useMemo<MapFeatureCollection>(() => ({
     type: "FeatureCollection",
     features: deposits
@@ -677,7 +785,7 @@ export function OperationsMap({
           ticket: deposit.scaleTicketCode || "Sem ticket",
           driver: deposit.driverName || deposit.driverRegistration,
           plate: deposit.vehiclePlate,
-          parcel: [deposit.plotPrimary, deposit.plotSecondary].filter(Boolean).join(" / "),
+          parcel: `Rua ${[deposit.plotPrimary, deposit.plotSecondary].filter(Boolean).join(" / ")}`,
           subproduct: deposit.subproduct,
           color: subproductColors[deposit.subproduct] || subproductColors.Outros,
           selected: deposit.id === selectedDepositId,
@@ -694,6 +802,8 @@ export function OperationsMap({
     visibleBoundaries: visibleBoundaryData,
     parcels: parcelData,
     visibleParcels: visibleParcelData,
+    streets: streetData,
+    visibleStreets: visibleStreetData,
     markers: markerData,
     farmScope,
   };
@@ -704,6 +814,7 @@ export function OperationsMap({
   );
   const gpsCount = markerData.features.length;
   const visibleParcelCount = visibleParcelData.features.length;
+  const visibleStreetCount = visibleStreetData.features.length;
   const visibleFarmCount = visibleBoundaryData.features.length;
 
   useEffect(() => {
@@ -750,6 +861,29 @@ export function OperationsMap({
         const depositId = String(event.features?.[0]?.properties?.depositId || "");
         if (depositId) callbackRef.current.onSelectDeposit(depositId);
       };
+      const inspectStreet = (event: MapLayerMouseEvent) => {
+        const properties = event.features?.[0]?.properties;
+        if (!properties) return;
+
+        const content = document.createElement("div");
+        content.className = "operations-map-street-popup";
+        const title = document.createElement("strong");
+        title.textContent = String(properties.streetName || "Rua entre parcelas");
+        const detail = document.createElement("span");
+        const length = Number(properties.lengthMeters || 0);
+        detail.textContent = `${Math.round(length)} m mapeados`;
+        const activity = document.createElement("em");
+        const depositCount = Number(properties.depositCount || 0);
+        activity.textContent = depositCount
+          ? `${depositCount} despejo${depositCount === 1 ? "" : "s"} registrado${depositCount === 1 ? "" : "s"}`
+          : "Sem despejos no filtro atual";
+        content.append(title, detail, activity);
+
+        new maplibregl.Popup({ closeButton: false, offset: 10 })
+          .setLngLat(event.lngLat)
+          .setDOMContent(content)
+          .addTo(map);
+      };
       const expandCluster = async (event: MapLayerMouseEvent) => {
         const feature = event.features?.[0];
         const clusterId = Number(feature?.properties?.cluster_id);
@@ -773,6 +907,7 @@ export function OperationsMap({
           map,
           currentData.boundaries,
           currentData.parcels,
+          currentData.streets,
           currentData.markers,
           showHeat,
           show3d,
@@ -786,9 +921,15 @@ export function OperationsMap({
         );
 
         map.on("click", operationalLayerIds.fill, selectParcel);
+        map.on("click", operationalLayerIds.streetLine, inspectStreet);
         map.on("click", operationalLayerIds.points, selectDischarge);
         map.on("click", operationalLayerIds.clusters, expandCluster);
-        [operationalLayerIds.fill, operationalLayerIds.points, operationalLayerIds.clusters].forEach((layer) => {
+        [
+          operationalLayerIds.fill,
+          operationalLayerIds.streetLine,
+          operationalLayerIds.points,
+          operationalLayerIds.clusters,
+        ].forEach((layer) => {
           map.on("mouseenter", layer, pointer);
           map.on("mouseleave", layer, defaultPointer);
         });
@@ -829,9 +970,11 @@ export function OperationsMap({
     if (!map || !readyRef.current) return;
     const boundaries = map.getSource(sourceIds.boundaries) as GeoJSONSource | undefined;
     const parcels = map.getSource(sourceIds.parcels) as GeoJSONSource | undefined;
+    const streets = map.getSource(sourceIds.streets) as GeoJSONSource | undefined;
     const markers = map.getSource(sourceIds.discharges) as GeoJSONSource | undefined;
     boundaries?.setData(boundaryData as never);
     parcels?.setData(parcelData as never);
+    streets?.setData(streetData as never);
     markers?.setData(markerData as never);
     setParcelFarmFilter(map, farmScope);
     raiseOperationalLayers(map);
@@ -852,7 +995,16 @@ export function OperationsMap({
     return () => {
       window.cancelAnimationFrame(latestMapFrameRef.current);
     };
-  }, [boundaryData, farmScope, markerData, parcelData, visibleBoundaryData, visibleParcelData]);
+  }, [
+    boundaryData,
+    farmScope,
+    markerData,
+    parcelData,
+    streetData,
+    visibleBoundaryData,
+    visibleParcelData,
+    visibleStreetData,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -892,6 +1044,7 @@ export function OperationsMap({
       data-map-status={status}
       data-farm-scope={farmScope}
       data-visible-parcels={visibleParcelCount}
+      data-visible-streets={visibleStreetCount}
       data-visible-farms={visibleFarmCount}
     >
       <div
@@ -920,7 +1073,9 @@ export function OperationsMap({
       <div className={`operations-map-status is-${status}`} aria-live="polite">
         <span />
         <strong>{statusMessage}</strong>
-        <em>{gpsCount} pontos GPS · {visibleParcelCount} parcelas · limites oficiais</em>
+        <em>
+          {gpsCount} rumas com GPS · {visibleParcelCount} parcelas · {visibleStreetCount} ruas mapeadas
+        </em>
       </div>
 
       <div className="operations-map-mode-switch" aria-label="Escolher visual do mapa">
@@ -979,8 +1134,12 @@ export function OperationsMap({
       <div className="operations-map-legend" aria-label="Legenda do mapa">
         <strong>
           <Layers3 aria-hidden="true" />
-          Subprodutos
+          Operação
         </strong>
+        <span className="operations-map-street-key">
+          <i />
+          Ruas entre parcelas
+        </span>
         {Object.entries(subproductColors).slice(0, 5).map(([label, color]) => (
           <span key={label}>
             <i style={{ backgroundColor: color }} />
@@ -1001,7 +1160,7 @@ export function OperationsMap({
             <small>{selectedDeposit.scaleTicketCode || "Sem ticket"}</small>
             <strong>{selectedDeposit.subproduct}</strong>
             <em>
-              {selectedDeposit.vehiclePlate} · {[selectedDeposit.plotPrimary, selectedDeposit.plotSecondary]
+              {selectedDeposit.vehiclePlate} · Rua {[selectedDeposit.plotPrimary, selectedDeposit.plotSecondary]
                 .filter(Boolean)
                 .join(" / ")}
             </em>

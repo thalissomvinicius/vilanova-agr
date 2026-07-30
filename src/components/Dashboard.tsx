@@ -1308,7 +1308,7 @@ function buildPriorityItems(deposits: FieldDeposit[], ticketMaps: TicketMaps): P
 
 function formatPlot(deposit: FieldDeposit) {
   if (deposit.placementMode === "between_plots") {
-    return `${deposit.plotPrimary} / ${deposit.plotSecondary || "-"}`;
+    return `Rua ${deposit.plotPrimary} / ${deposit.plotSecondary || "-"}`;
   }
 
   return deposit.plotPrimary;
@@ -3677,7 +3677,7 @@ export function Dashboard({
               <div>
                 <h2>Mapa operacional dos descarregos</h2>
                 <span className="chart-note">
-                  MapLibre + GeoJSON · {activeMapScopeLabel} · {activeMapParcels} parcelas e {activeMapMarkers} pontos GPS
+                  MapLibre + GeoJSON · {activeMapScopeLabel} · {activeMapParcels} parcelas e {activeMapMarkers} rumas GPS
                 </span>
               </div>
               <MapPinned aria-hidden="true" />

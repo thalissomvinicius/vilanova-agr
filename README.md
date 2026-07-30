@@ -81,6 +81,19 @@ py scripts/import_farm_shapes.py \
 O importador corrige a codificação do DBF, reprojeta os limites de
 SIRGAS 2000 / UTM 22S para WGS84 e valida as contagens por fazenda.
 
+Depois da importação, gere novamente as ruas operacionais entre parcelas:
+
+```bash
+python -m pip install shapely pyproj
+python scripts/build_interparcel_streets.py
+```
+
+O arquivo `src/data/interparcel-streets.json` contém os eixos dos corredores
+derivados dos vazios do shape oficial. Cada rua guarda o par de parcelas, a
+fazenda, a extensão e a largura estimada. No mapa, os despejos com o mesmo par
+de parcelas são vinculados ao corredor correspondente; o ponto GPS continua
+sendo preservado como a posição real da ruma.
+
 ## Fluxo operacional
 
 1. Motorista passa na balanca de saida.
