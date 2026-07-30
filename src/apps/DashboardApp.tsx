@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw, BarChart3, LogOut, UserRound } from "lucide-react";
+import { RefreshCw, BarChart3, LogOut, Menu, UserRound, X } from "lucide-react";
 import { Dashboard } from "../components/Dashboard";
 import { Login } from "../components/Login";
 import { logoutDashboardUser, refreshDashboardSession, type DashboardUser } from "../lib/auth";
@@ -19,6 +19,7 @@ export function DashboardApp() {
   const [reviewBusyDepositId, setReviewBusyDepositId] = useState<string | null>(null);
   const [deleteBusyDepositId, setDeleteBusyDepositId] = useState<string | null>(null);
   const [updateBusyDepositId, setUpdateBusyDepositId] = useState<string | null>(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const refresh = useCallback(async (profile: DashboardUser) => {
     setRefreshing(true);
@@ -75,6 +76,21 @@ export function DashboardApp() {
     return () => window.clearInterval(intervalId);
   }, [refresh, user]);
 
+  useEffect(() => {
+    if (!mobileNavOpen) return undefined;
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileNavOpen(false);
+    };
+
+    document.body.classList.add("mobile-nav-active");
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      document.body.classList.remove("mobile-nav-active");
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [mobileNavOpen]);
+
   const handleLogin = async (profile: DashboardUser) => {
     setUser(profile);
     setLoading(true);
@@ -86,6 +102,7 @@ export function DashboardApp() {
   };
 
   const handleLogout = async () => {
+    setMobileNavOpen(false);
     setLoading(true);
     await logoutDashboardUser(user);
     setUser(null);
@@ -178,19 +195,42 @@ export function DashboardApp() {
 
   return (
     <main className="app-shell dashboard-shell">
-      <aside className="side-rail">
+      <button
+        type="button"
+        className={`mobile-rail-backdrop ${mobileNavOpen ? "is-visible" : ""}`}
+        onClick={() => setMobileNavOpen(false)}
+        aria-label="Fechar navegação"
+        tabIndex={mobileNavOpen ? 0 : -1}
+      />
+
+      <aside id="dashboard-navigation" className={`side-rail ${mobileNavOpen ? "mobile-open" : ""}`}>
         <div className="brand-lockup">
           <img src="/logo-vilanova.png" alt="Vila Nova Agroindustrial" />
           <span className="module-badge">Dashboard Subprodutos</span>
+          <button
+            type="button"
+            className="rail-mobile-close"
+            onClick={() => setMobileNavOpen(false)}
+            aria-label="Fechar navegação"
+          >
+            <X aria-hidden="true" />
+          </button>
         </div>
 
         <nav className="main-nav" aria-label="Dashboard">
-          <a className="active" href="/dashboard">
+          <a className="active" href="/dashboard" onClick={() => setMobileNavOpen(false)}>
             <BarChart3 aria-hidden="true" />
             Painel
           </a>
           {user ? (
-            <button type="button" onClick={() => void refresh(user)} disabled={refreshing}>
+            <button
+              type="button"
+              onClick={() => {
+                setMobileNavOpen(false);
+                void refresh(user);
+              }}
+              disabled={refreshing}
+            >
               <RefreshCw aria-hidden="true" className={refreshing ? "spin" : ""} />
               Atualizar
             </button>
@@ -223,6 +263,48 @@ export function DashboardApp() {
       </aside>
 
       <section className="main-region dashboard-region">
+        <header className="dashboard-topbar">
+          <div className="dashboard-topbar-context">
+            <button
+              type="button"
+              className="dashboard-mobile-menu"
+              onClick={() => setMobileNavOpen(true)}
+              aria-label="Abrir navegação"
+              aria-controls="dashboard-navigation"
+              aria-expanded={mobileNavOpen}
+            >
+              <Menu aria-hidden="true" />
+            </button>
+            <div>
+              <span>Vila Nova Agroindustrial</span>
+              <strong>Central de Subprodutos</strong>
+            </div>
+          </div>
+
+          <div className="dashboard-topbar-status">
+            <span className={`dot ${loadError ? "offline" : "online"}`} />
+            <div>
+              <strong>{dataMode}</strong>
+              <span>
+                {lastUpdatedAt
+                  ? `Atualizado ${lastUpdatedAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`
+                  : "Aguardando atualização"}
+              </span>
+            </div>
+            {user ? (
+              <button
+                type="button"
+                onClick={() => void refresh(user)}
+                disabled={refreshing}
+                aria-label="Atualizar dados"
+                title="Atualizar dados"
+              >
+                <RefreshCw aria-hidden="true" className={refreshing ? "spin" : ""} />
+              </button>
+            ) : null}
+          </div>
+        </header>
+
         {loadError ? (
           <div className="dashboard-error" role="alert">
             <span>{loadError}</span>

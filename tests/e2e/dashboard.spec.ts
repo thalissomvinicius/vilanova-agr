@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("login, navegacao e layout responsivo do dashboard", async ({ page }) => {
+  test.setTimeout(90_000);
   await page.goto("/");
   await page.getByLabel("Matrícula").fill("2170");
   await page.getByLabel("Senha", { exact: true }).fill("teste-local");

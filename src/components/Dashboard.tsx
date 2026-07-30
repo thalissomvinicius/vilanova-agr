@@ -2190,7 +2190,7 @@ export function Dashboard({
     <section className={`dashboard-view ${presentationMode ? "presentation-mode" : ""}`}>
       <div className="surface-heading dashboard-heading">
         <div>
-          <p className="eyebrow">Operacao e analise</p>
+          <p className="eyebrow">Operação e análise</p>
           <h1>Dashboard Subprodutos</h1>
           <div className="header-meta">
             <span>Base Supabase</span>
