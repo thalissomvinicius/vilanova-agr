@@ -211,6 +211,20 @@ function setBasemap(map: MapLibreMap, mode: BasemapMode) {
   );
 }
 
+function setParcelFarmFilter(map: MapLibreMap, farmScope: FarmScope) {
+  const filter = farmScope === "all"
+    ? null
+    : ["==", ["get", "farmId"], farmScope] as never;
+
+  [
+    operationalLayerIds.extrusion,
+    operationalLayerIds.fill,
+    operationalLayerIds.outline,
+  ].forEach((layerId) => {
+    if (map.getLayer(layerId)) map.setFilter(layerId, filter);
+  });
+}
+
 function addOperationalLayers(
   map: MapLibreMap,
   parcels: MapFeatureCollection,
@@ -399,7 +413,13 @@ export function OperationsMap({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const callbackRef = useRef({ onSelectDeposit, onSelectParcel });
-  const latestDataRef = useRef<MapFeatureCollection[]>([]);
+  const latestMapFrameRef = useRef(0);
+  const latestDataRef = useRef<{
+    parcels: MapFeatureCollection;
+    visibleParcels: MapFeatureCollection;
+    markers: MapFeatureCollection;
+    farmScope: FarmScope;
+  } | null>(null);
   const readyRef = useRef(false);
   const [status, setStatus] = useState<MapStatus>("starting");
   const [statusMessage, setStatusMessage] = useState("Preparando motor geoespacial");
@@ -425,7 +445,6 @@ export function OperationsMap({
       type: "FeatureCollection",
       features: source.features
         .filter((feature) => ["vila-nova", "fe-em-deus"].includes(String(feature.properties.farmId || "")))
-        .filter((feature) => farmScope === "all" || feature.properties.farmId === farmScope)
         .map((feature) => {
           const farmId = String(feature.properties.farmId || "");
           const parcelId = String(feature.properties.parcelId || "");
@@ -442,7 +461,14 @@ export function OperationsMap({
           };
         }),
     };
-  }, [deposits, farmScope, selectedParcelId]);
+  }, [deposits, selectedParcelId]);
+
+  const visibleParcelData = useMemo<MapFeatureCollection>(() => ({
+    type: "FeatureCollection",
+    features: parcelData.features.filter(
+      (feature) => farmScope === "all" || feature.properties.farmId === farmScope,
+    ),
+  }), [farmScope, parcelData]);
 
   const markerData = useMemo<MapFeatureCollection>(() => ({
     type: "FeatureCollection",
@@ -473,13 +499,19 @@ export function OperationsMap({
       })),
   }), [deposits, farmScope, selectedDepositId]);
 
-  latestDataRef.current = [parcelData, markerData];
+  latestDataRef.current = {
+    parcels: parcelData,
+    visibleParcels: visibleParcelData,
+    markers: markerData,
+    farmScope,
+  };
 
   const selectedDeposit = useMemo(
     () => deposits.find((deposit) => deposit.id === selectedDepositId) || null,
     [deposits, selectedDepositId],
   );
   const gpsCount = markerData.features.length;
+  const visibleParcelCount = visibleParcelData.features.length;
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return undefined;
@@ -542,10 +574,12 @@ export function OperationsMap({
 
       map.once("load", () => {
         if (disposed) return;
-        const [parcels, markers] = latestDataRef.current;
-        addOperationalLayers(map, parcels, markers, showHeat, show3d);
+        const currentData = latestDataRef.current;
+        if (!currentData) return;
+        addOperationalLayers(map, currentData.parcels, currentData.markers, showHeat, show3d);
+        setParcelFarmFilter(map, currentData.farmScope);
         setBasemap(map, basemapMode);
-        fitMapToData(map, [parcels, markers], false);
+        fitMapToData(map, [currentData.visibleParcels, currentData.markers], false);
 
         map.on("click", operationalLayerIds.fill, selectParcel);
         map.on("click", operationalLayerIds.points, selectDischarge);
@@ -593,8 +627,24 @@ export function OperationsMap({
     const markers = map.getSource(sourceIds.discharges) as GeoJSONSource | undefined;
     parcels?.setData(parcelData as never);
     markers?.setData(markerData as never);
-    fitMapToData(map, [parcelData, markerData]);
-  }, [farmScope, markerData, parcelData]);
+    setParcelFarmFilter(map, farmScope);
+    map.stop();
+    map.resize();
+
+    const firstFrame = window.requestAnimationFrame(() => {
+      const secondFrame = window.requestAnimationFrame(() => {
+        map.resize();
+        fitMapToData(map, [visibleParcelData, markerData]);
+        map.triggerRepaint();
+      });
+      latestMapFrameRef.current = secondFrame;
+    });
+    latestMapFrameRef.current = firstFrame;
+
+    return () => {
+      window.cancelAnimationFrame(latestMapFrameRef.current);
+    };
+  }, [farmScope, markerData, parcelData, visibleParcelData]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -629,7 +679,12 @@ export function OperationsMap({
   const retryMap = () => window.location.reload();
 
   return (
-    <div className="operations-map-shell" data-map-status={status}>
+    <div
+      className="operations-map-shell"
+      data-map-status={status}
+      data-farm-scope={farmScope}
+      data-visible-parcels={visibleParcelCount}
+    >
       <div
         className="operations-map-canvas"
         ref={containerRef}
@@ -656,7 +711,7 @@ export function OperationsMap({
       <div className={`operations-map-status is-${status}`} aria-live="polite">
         <span />
         <strong>{statusMessage}</strong>
-        <em>{gpsCount} pontos GPS · {parcelData.features.length} parcelas</em>
+        <em>{gpsCount} pontos GPS · {visibleParcelCount} parcelas</em>
       </div>
 
       <div className="operations-map-mode-switch" aria-label="Escolher visual do mapa">
