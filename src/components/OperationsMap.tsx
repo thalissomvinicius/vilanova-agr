@@ -319,7 +319,7 @@ function addOperationalLayers(
         ["==", ["get", "farmId"], "vila-nova"], "#2a8054",
         "#347ca2",
       ],
-      "fill-opacity": 0.1,
+      "fill-opacity": 0.035,
     },
   });
   map.addLayer({
@@ -361,9 +361,9 @@ function addOperationalLayers(
       ],
       "fill-opacity": [
         "case",
-        ["boolean", ["get", "selected"], false], 0.68,
-        [">", ["number", ["get", "depositCount"], 0], 0], 0.48,
-        0.24,
+        ["boolean", ["get", "selected"], false], 0.26,
+        [">", ["number", ["get", "depositCount"], 0], 0], 0.16,
+        0.08,
       ],
     },
   });
@@ -375,11 +375,15 @@ function addOperationalLayers(
       "line-color": "rgba(255,255,255,0.92)",
       "line-width": [
         "case",
-        ["boolean", ["get", "selected"], false], 7,
-        4,
+        ["boolean", ["get", "selected"], false], 3,
+        1.5,
       ],
-      "line-opacity": 0.72,
-      "line-blur": 0.45,
+      "line-opacity": [
+        "case",
+        ["boolean", ["get", "selected"], false], 0.58,
+        0.38,
+      ],
+      "line-blur": 0.25,
     },
   });
   map.addLayer({
@@ -394,10 +398,10 @@ function addOperationalLayers(
       ],
       "line-width": [
         "case",
-        ["boolean", ["get", "selected"], false], 4,
-        1.5,
+        ["boolean", ["get", "selected"], false], 1.7,
+        0.65,
       ],
-      "line-opacity": 0.95,
+      "line-opacity": 0.9,
     },
   });
   map.addLayer({
@@ -406,9 +410,9 @@ function addOperationalLayers(
     source: sourceIds.boundaries,
     paint: {
       "line-color": "rgba(255,255,255,0.96)",
-      "line-width": ["interpolate", ["linear"], ["zoom"], 9, 4, 15, 8],
-      "line-opacity": 0.92,
-      "line-blur": 0.55,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 9, 2, 15, 3],
+      "line-opacity": 0.55,
+      "line-blur": 0.3,
     },
   });
   map.addLayer({
@@ -421,8 +425,8 @@ function addOperationalLayers(
         ["==", ["get", "farmId"], "vila-nova"], "#db8f12",
         "#256c94",
       ],
-      "line-width": ["interpolate", ["linear"], ["zoom"], 9, 2.4, 15, 4.5],
-      "line-opacity": 1,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 9, 0.9, 15, 1.5],
+      "line-opacity": 0.92,
     },
   });
   map.addLayer({

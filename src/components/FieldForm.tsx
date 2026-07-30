@@ -65,7 +65,7 @@ const initialForm: FormState = {
   loadingOriginOther: "",
   scaleTicketCode: "",
   farm: "VILA NOVA",
-  placementMode: "single_plot",
+  placementMode: "between_plots",
   plotPrimary: "",
   plotSecondary: "",
   depositDate: todayInputValue(),
@@ -275,7 +275,6 @@ export function FieldForm({ onSaved }: FieldFormProps) {
     const farmReady = Boolean(getFieldFarmByValue(form.farm));
     const primaryParcelReady = isValidFarmParcel(selectedFarm.id, form.plotPrimary);
     const secondaryParcelReady =
-      form.placementMode === "single_plot" ||
       isValidBetweenParcelPair(selectedFarm.id, form.plotPrimary, form.plotSecondary);
 
     if (!form.driverRegistration.trim()) missing.push("matricula");
@@ -285,7 +284,7 @@ export function FieldForm({ onSaved }: FieldFormProps) {
     if (!form.loadingOrigin || !loadingOriginReady) missing.push("origem do carregamento");
     if (!form.scaleTicketCode.trim()) missing.push("ticket da balanca");
     if (!farmReady) missing.push("fazenda");
-    if (!primaryParcelReady) missing.push(form.placementMode === "between_plots" ? "parcela principal" : "parcela");
+    if (!primaryParcelReady) missing.push("parcela principal");
     if (!secondaryParcelReady) missing.push("parcela vizinha");
     if (!form.depositDate) missing.push("data");
     if (!form.depositTime) missing.push("hora");
@@ -314,16 +313,6 @@ export function FieldForm({ onSaved }: FieldFormProps) {
       farm: value,
       plotPrimary: "",
       plotSecondary: "",
-    }));
-  };
-
-  const updatePlacementMode = (value: PlacementMode) => {
-    setSavedMessage("");
-    setSavedMessageIsError(false);
-    setForm((current) => ({
-      ...current,
-      placementMode: value,
-      plotSecondary: value === "single_plot" ? "" : current.plotSecondary,
     }));
   };
 
@@ -385,7 +374,7 @@ export function FieldForm({ onSaved }: FieldFormProps) {
         capturedAt,
         farm: form.farm,
         plotPrimary: form.plotPrimary,
-        plotSecondary: form.placementMode === "between_plots" ? form.plotSecondary : "",
+        plotSecondary: form.plotSecondary,
         scaleTicketCode: form.scaleTicketCode.trim().toUpperCase(),
       });
 
@@ -504,10 +493,9 @@ export function FieldForm({ onSaved }: FieldFormProps) {
       loadingOrigin,
       scaleTicketCode: form.scaleTicketCode.trim().toUpperCase(),
       farm: form.farm.trim(),
-      placementMode: form.placementMode,
+      placementMode: "between_plots",
       plotPrimary: form.plotPrimary.trim(),
-      plotSecondary:
-        form.placementMode === "between_plots" ? form.plotSecondary.trim() : "",
+      plotSecondary: form.plotSecondary.trim(),
       depositDate: form.depositDate,
       depositTime: form.depositTime,
       latitude: location.latitude,
@@ -688,28 +676,14 @@ export function FieldForm({ onSaved }: FieldFormProps) {
           </label>
         </div>
 
-        <div className="segmented" role="group" aria-label="Local do despejo">
-          <button
-            type="button"
-            className={form.placementMode === "single_plot" ? "active" : ""}
-            onClick={() => updatePlacementMode("single_plot")}
-          >
-            Na parcela
-          </button>
-          <button
-            type="button"
-            className={form.placementMode === "between_plots" ? "active" : ""}
-            onClick={() => updatePlacementMode("between_plots")}
-          >
-            Entre parcelas
-          </button>
+        <div className="form-operational-note" role="note">
+          <strong>Local do despejo: rua entre parcelas</strong>
+          <span>Selecione a parcela principal e a parcela vizinha.</span>
         </div>
 
         <div className="form-grid">
           <label>
-            <RequiredLabel>
-              {form.placementMode === "between_plots" ? "Parcela principal" : "Parcela"}
-            </RequiredLabel>
+            <RequiredLabel>Parcela principal</RequiredLabel>
             <select
               value={form.plotPrimary}
               onChange={(event) => updatePlotPrimary(event.target.value)}
@@ -726,10 +700,9 @@ export function FieldForm({ onSaved }: FieldFormProps) {
             </select>
           </label>
 
-          {form.placementMode === "between_plots" ? (
-            <label>
-              <RequiredLabel>Parcela vizinha</RequiredLabel>
-              <select
+          <label>
+            <RequiredLabel>Parcela vizinha</RequiredLabel>
+            <select
                 value={form.plotSecondary}
                 onChange={(event) => update("plotSecondary", event.target.value)}
                 disabled={!form.plotPrimary || secondaryParcelOptions.length === 0}
@@ -745,9 +718,8 @@ export function FieldForm({ onSaved }: FieldFormProps) {
                     })} ha`}
                   </option>
                 ))}
-              </select>
-            </label>
-          ) : null}
+            </select>
+          </label>
 
           <label>
             <RequiredLabel>Data</RequiredLabel>

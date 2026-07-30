@@ -1323,7 +1323,7 @@ function editValuesFromDeposit(deposit: FieldDeposit): FieldDepositEditValues {
     loadingOrigin: getLoadingOrigin(deposit),
     scaleTicketCode: deposit.scaleTicketCode,
     farm: deposit.farm,
-    placementMode: deposit.placementMode,
+    placementMode: "between_plots",
     plotPrimary: deposit.plotPrimary,
     plotSecondary: deposit.plotSecondary,
     depositDate: deposit.depositDate,
@@ -1353,13 +1353,10 @@ function requiredEditFields(values: FieldDepositEditValues) {
     values.scaleTicketCode,
     values.farm,
     values.plotPrimary,
+    values.plotSecondary,
     values.depositDate,
     values.depositTime,
   ];
-
-  if (values.placementMode === "between_plots") {
-    required.push(values.plotSecondary);
-  }
 
   return required.every((value) => String(value || "").trim());
 }
@@ -2021,8 +2018,9 @@ export function Dashboard({
     try {
       await onUpdateDeposit(editDepositId, {
         ...editValues,
+        placementMode: "between_plots",
         vehiclePlate: editValues.vehiclePlate.toUpperCase(),
-        plotSecondary: editValues.placementMode === "between_plots" ? editValues.plotSecondary : "",
+        plotSecondary: editValues.plotSecondary,
       });
       setSelectedDepositId(editDepositId);
       setEditDepositId(null);
@@ -3301,16 +3299,7 @@ export function Dashboard({
               </label>
               <label>
                 <span>Aplicação *</span>
-                <select
-                  value={editValues.placementMode}
-                  onChange={(event) => updateEditValue(
-                    "placementMode",
-                    event.target.value === "between_plots" ? "between_plots" : "single_plot",
-                  )}
-                >
-                  <option value="single_plot">Na parcela</option>
-                  <option value="between_plots">Entre parcelas</option>
-                </select>
+                <input value="Rua entre parcelas" readOnly />
               </label>
               <label>
                 <span>Parcela principal *</span>
@@ -3320,10 +3309,9 @@ export function Dashboard({
                 />
               </label>
               <label>
-                <span>{editValues.placementMode === "between_plots" ? "Parcela vizinha *" : "Parcela vizinha"}</span>
+                <span>Parcela vizinha *</span>
                 <input
                   value={editValues.plotSecondary}
-                  disabled={editValues.placementMode !== "between_plots"}
                   onChange={(event) => updateEditValue("plotSecondary", event.target.value.toUpperCase())}
                 />
               </label>
