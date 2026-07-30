@@ -1,0 +1,20 @@
+# Credenciais e metadados locais
+.env
+.env.*
+.vercel
+.git
+
+# Dependências, testes e saídas reconstruídas
+node_modules
+dist
+playwright-report
+test-results
+tests
+
+# Materiais operacionais fora do artefato web
+docs
+supabase
+*.sql
+*.log
+*.png
+!public/*.png
