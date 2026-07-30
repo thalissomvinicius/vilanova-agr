@@ -61,6 +61,7 @@ const operationalLayerIds = {
   heat: "vna-discharge-heat",
   extrusion: "vna-parcels-extrusion",
   fill: "vna-parcels-fill",
+  outlineGlow: "vna-parcels-outline-glow",
   outline: "vna-parcels-outline",
   clusters: "vna-discharge-clusters",
   clusterCount: "vna-discharge-cluster-count",
@@ -111,6 +112,18 @@ const subproductColors: Record<string, string> = {
 };
 
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
+
+const operationalLayerOrder = [
+  operationalLayerIds.heat,
+  operationalLayerIds.extrusion,
+  operationalLayerIds.fill,
+  operationalLayerIds.outlineGlow,
+  operationalLayerIds.outline,
+  operationalLayerIds.clusters,
+  operationalLayerIds.clusterCount,
+  operationalLayerIds.pointsHalo,
+  operationalLayerIds.points,
+];
 
 function normalizeText(value: unknown) {
   return String(value || "")
@@ -183,10 +196,20 @@ function fitMapToData(map: MapLibreMap, collections: MapFeatureCollection[], ani
   });
 }
 
+function raiseOperationalLayers(map: MapLibreMap) {
+  operationalLayerOrder.forEach((layerId) => {
+    if (map.getLayer(layerId)) map.moveLayer(layerId);
+  });
+}
+
 function setBasemap(map: MapLibreMap, mode: BasemapMode) {
   if (map.getLayer("vna-basemap-raster")) map.removeLayer("vna-basemap-raster");
   if (map.getSource(sourceIds.basemap)) map.removeSource(sourceIds.basemap);
-  if (mode === "clean") return;
+  if (mode === "clean") {
+    raiseOperationalLayers(map);
+    map.triggerRepaint();
+    return;
+  }
 
   const basemap = basemaps[mode];
   map.addSource(sourceIds.basemap, {
@@ -202,13 +225,15 @@ function setBasemap(map: MapLibreMap, mode: BasemapMode) {
       type: "raster",
       source: sourceIds.basemap,
       paint: {
-        "raster-opacity": mode === "satellite" ? 0.92 : 1,
+        "raster-opacity": mode === "satellite" ? 0.88 : 0.84,
         "raster-saturation": mode === "satellite" ? -0.12 : -0.3,
         "raster-contrast": mode === "satellite" ? 0.08 : 0.02,
       },
     },
     operationalLayerIds.heat,
   );
+  raiseOperationalLayers(map);
+  map.triggerRepaint();
 }
 
 function setParcelFarmFilter(map: MapLibreMap, farmScope: FarmScope) {
@@ -219,6 +244,7 @@ function setParcelFarmFilter(map: MapLibreMap, farmScope: FarmScope) {
   [
     operationalLayerIds.extrusion,
     operationalLayerIds.fill,
+    operationalLayerIds.outlineGlow,
     operationalLayerIds.outline,
   ].forEach((layerId) => {
     if (map.getLayer(layerId)) map.setFilter(layerId, filter);
@@ -313,6 +339,21 @@ function addOperationalLayers(
     },
   });
   map.addLayer({
+    id: operationalLayerIds.outlineGlow,
+    type: "line",
+    source: sourceIds.parcels,
+    paint: {
+      "line-color": "rgba(255,255,255,0.92)",
+      "line-width": [
+        "case",
+        ["boolean", ["get", "selected"], false], 7,
+        4,
+      ],
+      "line-opacity": 0.72,
+      "line-blur": 0.45,
+    },
+  });
+  map.addLayer({
     id: operationalLayerIds.outline,
     type: "line",
     source: sourceIds.parcels,
@@ -400,6 +441,7 @@ function addOperationalLayers(
       ],
     },
   });
+  raiseOperationalLayers(map);
 }
 
 export function OperationsMap({
@@ -628,6 +670,7 @@ export function OperationsMap({
     parcels?.setData(parcelData as never);
     markers?.setData(markerData as never);
     setParcelFarmFilter(map, farmScope);
+    raiseOperationalLayers(map);
     map.stop();
     map.resize();
 
@@ -635,6 +678,7 @@ export function OperationsMap({
       const secondFrame = window.requestAnimationFrame(() => {
         map.resize();
         fitMapToData(map, [visibleParcelData, markerData]);
+        raiseOperationalLayers(map);
         map.triggerRepaint();
       });
       latestMapFrameRef.current = secondFrame;
