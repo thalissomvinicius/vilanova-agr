@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("login, navegacao e layout responsivo do dashboard", async ({ page }) => {
   test.setTimeout(90_000);
+  await page.route(/(?:arcgisonline|cartocdn)/, (route) => route.abort());
   await page.goto("/");
   await page.getByLabel("Matrícula").fill("2170");
   await page.getByLabel("Senha", { exact: true }).fill("teste-local");
@@ -15,10 +16,12 @@ test("login, navegacao e layout responsivo do dashboard", async ({ page }) => {
     await expect(page.getByRole("tab", { name: tab })).toHaveAttribute("aria-selected", "true");
   }
 
-  await expect(page.getByText("MapLibre · GeoJSON · tiles vetoriais")).toBeVisible();
+  await expect(page.locator(".operations-map-status strong")).toHaveText(/Mapa operacional/);
   await expect(page.locator(".operations-map-loading")).toBeHidden({ timeout: 30_000 });
   await expect(page.locator(".maplibregl-canvas")).toBeVisible();
   await expect(page.locator(".operations-map-error")).toHaveCount(0);
+  await expect(page.locator(".operations-map-shell")).toHaveAttribute("data-map-status", "ready");
+  await expect(page.getByRole("button", { name: "Limpo", exact: true })).toBeVisible();
 
   await page.getByRole("tab", { name: "Coletas" }).click();
   await expect(page.getByLabel("Ordenar coletas")).toBeVisible();

@@ -4,14 +4,28 @@ import type {
   GeoJSONSource,
   Map as MapLibreMap,
   MapLayerMouseEvent,
+  StyleSpecification,
 } from "maplibre-gl";
+import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { Crosshair, Layers3, MapPinned, Satellite, WifiOff } from "lucide-react";
+import {
+  Box,
+  Crosshair,
+  Flame,
+  Layers3,
+  Map as MapIcon,
+  MapPinned,
+  Satellite,
+  Sparkles,
+  WifiOff,
+} from "lucide-react";
 import farmParcelsGeoJson from "../data/farm-parcels.json";
 import type { FieldDeposit } from "../types";
 
 type FarmScope = "all" | "vila-nova" | "fe-em-deus";
 type Coordinate = [number, number];
+type BasemapMode = "satellite" | "street" | "clean";
+type MapStatus = "starting" | "ready" | "degraded" | "unsupported";
 
 interface MapFeature {
   type: "Feature";
@@ -37,17 +51,66 @@ interface OperationsMapProps {
   onSelectParcel: (farmId: Exclude<FarmScope, "all">, parcelId: string) => void;
 }
 
-const mapStyleUrl = "https://tiles.openfreemap.org/styles/liberty";
 const mapCenter: Coordinate = [-48.22, -2.86];
+const sourceIds = {
+  parcels: "vna-parcels",
+  discharges: "vna-discharges",
+  basemap: "vna-basemap",
+};
+const operationalLayerIds = {
+  heat: "vna-discharge-heat",
+  extrusion: "vna-parcels-extrusion",
+  fill: "vna-parcels-fill",
+  outline: "vna-parcels-outline",
+  clusters: "vna-discharge-clusters",
+  clusterCount: "vna-discharge-cluster-count",
+  pointsHalo: "vna-discharges-points-halo",
+  points: "vna-discharges-points",
+};
+
+const localStyle: StyleSpecification = {
+  version: 8,
+  sources: {},
+  layers: [
+    {
+      id: "vna-background",
+      type: "background",
+      paint: {
+        "background-color": "#dce9df",
+      },
+    },
+  ],
+};
+
+const basemaps: Record<Exclude<BasemapMode, "clean">, {
+  label: string;
+  tiles: string[];
+  attribution: string;
+}> = {
+  satellite: {
+    label: "Satélite",
+    tiles: [
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    ],
+    attribution: "Imagery © Esri",
+  },
+  street: {
+    label: "Ruas",
+    tiles: ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"],
+    attribution: "© OpenStreetMap contributors © CARTO",
+  },
+};
 
 const subproductColors: Record<string, string> = {
-  Borra: "#1f6a44",
-  "Cacho Vazio (Bucha)": "#2f6f9f",
-  "Cacho Triturado": "#78a83e",
-  Cinza: "#737d78",
-  Torta: "#d99721",
-  Outros: "#d86635",
+  Borra: "#176443",
+  "Cacho Vazio (Bucha)": "#28719d",
+  "Cacho Triturado": "#74a93e",
+  Cinza: "#68736e",
+  Torta: "#d99620",
+  Outros: "#d65e32",
 };
+
+maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
 function normalizeText(value: unknown) {
   return String(value || "")
@@ -69,7 +132,10 @@ function normalizeParcel(value: unknown) {
 }
 
 function hasGps(deposit: FieldDeposit) {
-  return typeof deposit.latitude === "number" && typeof deposit.longitude === "number";
+  return typeof deposit.latitude === "number"
+    && typeof deposit.longitude === "number"
+    && Number.isFinite(deposit.latitude)
+    && Number.isFinite(deposit.longitude);
 }
 
 function flattenCoordinates(value: unknown): Coordinate[] {
@@ -84,11 +150,26 @@ function flattenCoordinates(value: unknown): Coordinate[] {
   return value.flatMap(flattenCoordinates);
 }
 
-function fitMapToData(map: MapLibreMap, collections: MapFeatureCollection[]) {
+function browserSupportsWebGl() {
+  try {
+    const canvas = document.createElement("canvas");
+    return Boolean(
+      window.WebGL2RenderingContext && canvas.getContext("webgl2")
+      || window.WebGLRenderingContext && canvas.getContext("webgl"),
+    );
+  } catch {
+    return false;
+  }
+}
+
+function fitMapToData(map: MapLibreMap, collections: MapFeatureCollection[], animate = true) {
   const coordinates = collections.flatMap((collection) => (
     collection.features.flatMap((feature) => flattenCoordinates(feature.geometry.coordinates))
   ));
-  if (!coordinates.length) return;
+  if (!coordinates.length) {
+    map.easeTo({ center: mapCenter, zoom: 11.2, duration: animate ? 500 : 0 });
+    return;
+  }
 
   const bounds = coordinates.reduce(
     (current, coordinate) => current.extend(coordinate),
@@ -96,164 +177,213 @@ function fitMapToData(map: MapLibreMap, collections: MapFeatureCollection[]) {
   );
 
   map.fitBounds(bounds, {
-    padding: { top: 56, right: 42, bottom: 48, left: 42 },
+    padding: { top: 92, right: 54, bottom: 110, left: 54 },
     maxZoom: 15.4,
-    duration: 650,
+    duration: animate ? 700 : 0,
   });
+}
+
+function setBasemap(map: MapLibreMap, mode: BasemapMode) {
+  if (map.getLayer("vna-basemap-raster")) map.removeLayer("vna-basemap-raster");
+  if (map.getSource(sourceIds.basemap)) map.removeSource(sourceIds.basemap);
+  if (mode === "clean") return;
+
+  const basemap = basemaps[mode];
+  map.addSource(sourceIds.basemap, {
+    type: "raster",
+    tiles: basemap.tiles,
+    tileSize: 256,
+    maxzoom: 20,
+    attribution: basemap.attribution,
+  });
+  map.addLayer(
+    {
+      id: "vna-basemap-raster",
+      type: "raster",
+      source: sourceIds.basemap,
+      paint: {
+        "raster-opacity": mode === "satellite" ? 0.92 : 1,
+        "raster-saturation": mode === "satellite" ? -0.12 : -0.3,
+        "raster-contrast": mode === "satellite" ? 0.08 : 0.02,
+      },
+    },
+    operationalLayerIds.heat,
+  );
 }
 
 function addOperationalLayers(
   map: MapLibreMap,
   parcels: MapFeatureCollection,
   markers: MapFeatureCollection,
+  showHeat: boolean,
+  show3d: boolean,
 ) {
-  map.addSource("vna-parcels", {
+  map.addSource(sourceIds.parcels, {
     type: "geojson",
     data: parcels as never,
   });
-  map.addLayer({
-    id: "vna-parcels-fill",
-    type: "fill",
-    source: "vna-parcels",
-    paint: {
-      "fill-color": [
-        "case",
-        ["==", ["get", "farmId"], "vila-nova"],
-        "#27704a",
-        "#2e6f94",
-      ],
-      "fill-opacity": [
-        "case",
-        ["boolean", ["get", "selected"], false],
-        0.62,
-        [">", ["number", ["get", "depositCount"], 0], 0],
-        0.42,
-        0.18,
-      ],
-    },
-  });
-  map.addLayer({
-    id: "vna-parcels-outline",
-    type: "line",
-    source: "vna-parcels",
-    paint: {
-      "line-color": [
-        "case",
-        ["boolean", ["get", "selected"], false],
-        "#f2b134",
-        "#174a35",
-      ],
-      "line-width": [
-        "case",
-        ["boolean", ["get", "selected"], false],
-        3,
-        1.25,
-      ],
-      "line-opacity": 0.9,
-    },
-  });
-  map.addLayer({
-    id: "vna-parcels-label",
-    type: "symbol",
-    source: "vna-parcels",
-    minzoom: 12.4,
-    layout: {
-      "text-field": ["get", "parcelLabel"],
-      "text-size": ["interpolate", ["linear"], ["zoom"], 12, 9, 16, 13],
-      "text-font": ["Noto Sans Bold"],
-      "text-allow-overlap": false,
-    },
-    paint: {
-      "text-color": "#123d2b",
-      "text-halo-color": "rgba(255,255,255,0.94)",
-      "text-halo-width": 1.6,
-    },
-  });
-
-  map.addSource("vna-discharges", {
+  map.addSource(sourceIds.discharges, {
     type: "geojson",
     data: markers as never,
     cluster: true,
     clusterRadius: 44,
     clusterMaxZoom: 14,
   });
+
   map.addLayer({
-    id: "vna-discharge-clusters",
+    id: operationalLayerIds.heat,
+    type: "heatmap",
+    source: sourceIds.discharges,
+    maxzoom: 15.5,
+    layout: { visibility: showHeat ? "visible" : "none" },
+    paint: {
+      "heatmap-weight": 0.82,
+      "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 8, 0.6, 15, 1.8],
+      "heatmap-color": [
+        "interpolate",
+        ["linear"],
+        ["heatmap-density"],
+        0, "rgba(24,101,67,0)",
+        0.25, "rgba(102,164,73,0.54)",
+        0.55, "rgba(239,177,50,0.72)",
+        0.8, "rgba(224,91,46,0.82)",
+        1, "rgba(123,35,24,0.92)",
+      ],
+      "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 9, 15, 15, 30],
+      "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 13, 0.85, 16, 0.1],
+    },
+  });
+  map.addLayer({
+    id: operationalLayerIds.extrusion,
+    type: "fill-extrusion",
+    source: sourceIds.parcels,
+    minzoom: 10.5,
+    layout: { visibility: show3d ? "visible" : "none" },
+    paint: {
+      "fill-extrusion-color": [
+        "case",
+        ["==", ["get", "farmId"], "vila-nova"],
+        "#1f7a4d",
+        "#28749e",
+      ],
+      "fill-extrusion-height": [
+        "interpolate",
+        ["linear"],
+        ["number", ["get", "depositCount"], 0],
+        0, 2,
+        1, 10,
+        8, 32,
+        20, 54,
+      ],
+      "fill-extrusion-base": 0,
+      "fill-extrusion-opacity": 0.8,
+    },
+  });
+  map.addLayer({
+    id: operationalLayerIds.fill,
+    type: "fill",
+    source: sourceIds.parcels,
+    paint: {
+      "fill-color": [
+        "case",
+        ["boolean", ["get", "selected"], false], "#f2b134",
+        ["==", ["get", "farmId"], "vila-nova"], "#25784e",
+        "#2f759d",
+      ],
+      "fill-opacity": [
+        "case",
+        ["boolean", ["get", "selected"], false], 0.68,
+        [">", ["number", ["get", "depositCount"], 0], 0], 0.48,
+        0.24,
+      ],
+    },
+  });
+  map.addLayer({
+    id: operationalLayerIds.outline,
+    type: "line",
+    source: sourceIds.parcels,
+    paint: {
+      "line-color": [
+        "case",
+        ["boolean", ["get", "selected"], false], "#ffd56a",
+        "#103e2a",
+      ],
+      "line-width": [
+        "case",
+        ["boolean", ["get", "selected"], false], 4,
+        1.5,
+      ],
+      "line-opacity": 0.95,
+    },
+  });
+  map.addLayer({
+    id: operationalLayerIds.clusters,
     type: "circle",
-    source: "vna-discharges",
+    source: sourceIds.discharges,
     filter: ["has", "point_count"],
     paint: {
       "circle-color": [
         "step",
         ["get", "point_count"],
-        "#34785a",
-        10,
-        "#d99721",
-        25,
-        "#d86635",
+        "#256a49",
+        10, "#d89520",
+        25, "#d65e32",
       ],
-      "circle-radius": ["step", ["get", "point_count"], 18, 10, 23, 25, 29],
+      "circle-radius": ["step", ["get", "point_count"], 18, 10, 24, 25, 31],
       "circle-stroke-color": "#ffffff",
       "circle-stroke-width": 3,
-      "circle-opacity": 0.94,
+      "circle-opacity": 0.96,
     },
   });
   map.addLayer({
-    id: "vna-discharge-cluster-count",
+    id: operationalLayerIds.clusterCount,
     type: "symbol",
-    source: "vna-discharges",
+    source: sourceIds.discharges,
     filter: ["has", "point_count"],
     layout: {
       "text-field": ["get", "point_count_abbreviated"],
       "text-size": 12,
     },
+    paint: { "text-color": "#ffffff" },
+  });
+  map.addLayer({
+    id: operationalLayerIds.pointsHalo,
+    type: "circle",
+    source: sourceIds.discharges,
+    filter: ["!", ["has", "point_count"]],
     paint: {
-      "text-color": "#ffffff",
+      "circle-color": "#ffffff",
+      "circle-radius": [
+        "case",
+        ["boolean", ["get", "selected"], false], 15,
+        11,
+      ],
+      "circle-opacity": 0.96,
+      "circle-blur": 0.15,
     },
   });
   map.addLayer({
-    id: "vna-discharges-points",
+    id: operationalLayerIds.points,
     type: "circle",
-    source: "vna-discharges",
+    source: sourceIds.discharges,
     filter: ["!", ["has", "point_count"]],
     paint: {
       "circle-color": ["get", "color"],
       "circle-radius": [
         "case",
-        ["boolean", ["get", "selected"], false],
-        10,
+        ["boolean", ["get", "selected"], false], 10,
         7,
       ],
       "circle-stroke-color": [
         "case",
-        ["boolean", ["get", "selected"], false],
-        "#f2b134",
+        ["boolean", ["get", "selected"], false], "#ffd56a",
         "#ffffff",
       ],
       "circle-stroke-width": [
         "case",
-        ["boolean", ["get", "selected"], false],
-        4,
-        2.5,
+        ["boolean", ["get", "selected"], false], 3,
+        1.5,
       ],
-    },
-  });
-  map.addLayer({
-    id: "vna-discharges-labels",
-    type: "symbol",
-    source: "vna-discharges",
-    minzoom: 14.2,
-    filter: ["!", ["has", "point_count"]],
-    layout: {
-      "text-field": ["get", "ticket"],
-      "text-size": 10,
-      "text-offset": [0, 1.55],
-      "text-anchor": "top",
-    },
-    paint: {
-      "text-color": "#123d2b",
-      "text-halo-color": "#ffffff",
-      "text-halo-width": 1.5,
     },
   });
 }
@@ -269,8 +399,13 @@ export function OperationsMap({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const callbackRef = useRef({ onSelectDeposit, onSelectParcel });
-  const [mapReady, setMapReady] = useState(false);
-  const [mapError, setMapError] = useState("");
+  const latestDataRef = useRef<MapFeatureCollection[]>([]);
+  const readyRef = useRef(false);
+  const [status, setStatus] = useState<MapStatus>("starting");
+  const [statusMessage, setStatusMessage] = useState("Preparando motor geoespacial");
+  const [basemapMode, setBasemapMode] = useState<BasemapMode>("satellite");
+  const [showHeat, setShowHeat] = useState(false);
+  const [show3d, setShow3d] = useState(false);
 
   callbackRef.current = { onSelectDeposit, onSelectParcel };
 
@@ -289,6 +424,7 @@ export function OperationsMap({
     return {
       type: "FeatureCollection",
       features: source.features
+        .filter((feature) => ["vila-nova", "fe-em-deus"].includes(String(feature.properties.farmId || "")))
         .filter((feature) => farmScope === "all" || feature.properties.farmId === farmScope)
         .map((feature) => {
           const farmId = String(feature.properties.farmId || "");
@@ -337,112 +473,243 @@ export function OperationsMap({
       })),
   }), [deposits, farmScope, selectedDepositId]);
 
+  latestDataRef.current = [parcelData, markerData];
+
   const selectedDeposit = useMemo(
     () => deposits.find((deposit) => deposit.id === selectedDepositId) || null,
     [deposits, selectedDepositId],
   );
+  const gpsCount = markerData.features.length;
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return undefined;
+    if (!browserSupportsWebGl()) {
+      setStatus("unsupported");
+      setStatusMessage("Este navegador não disponibilizou aceleração gráfica.");
+      return undefined;
+    }
 
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: mapStyleUrl,
-      center: mapCenter,
-      zoom: 11.2,
-      attributionControl: false,
-      maxPitch: 60,
-    });
-    mapRef.current = map;
-    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
-    map.addControl(new maplibregl.FullscreenControl(), "top-right");
-    map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "metric" }), "bottom-left");
-    map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
-
-    const selectParcel = (event: MapLayerMouseEvent) => {
-      const feature = event.features?.[0];
-      const farmId = feature?.properties?.farmId as Exclude<FarmScope, "all"> | undefined;
-      const parcelId = String(feature?.properties?.parcelId || "");
-      if (farmId && parcelId) callbackRef.current.onSelectParcel(farmId, parcelId);
-    };
-    const selectDischarge = (event: MapLayerMouseEvent) => {
-      const depositId = String(event.features?.[0]?.properties?.depositId || "");
-      if (depositId) callbackRef.current.onSelectDeposit(depositId);
-    };
-    const expandCluster = async (event: MapLayerMouseEvent) => {
-      const feature = event.features?.[0];
-      const clusterId = Number(feature?.properties?.cluster_id);
-      const source = map.getSource("vna-discharges") as GeoJSONSource | undefined;
-      if (!source || !Number.isFinite(clusterId) || !feature?.geometry || feature.geometry.type !== "Point") return;
-      const zoom = await source.getClusterExpansionZoom(clusterId);
-      map.easeTo({
-        center: feature.geometry.coordinates as Coordinate,
-        zoom,
-      });
-    };
-    const pointer = () => {
-      map.getCanvas().style.cursor = "pointer";
-    };
-    const defaultPointer = () => {
-      map.getCanvas().style.cursor = "";
-    };
-
-    map.on("load", () => {
-      addOperationalLayers(map, parcelData, markerData);
-      fitMapToData(map, [parcelData, markerData]);
-      map.on("click", "vna-parcels-fill", selectParcel);
-      map.on("click", "vna-discharges-points", selectDischarge);
-      map.on("click", "vna-discharge-clusters", expandCluster);
-      ["vna-parcels-fill", "vna-discharges-points", "vna-discharge-clusters"].forEach((layer) => {
-        map.on("mouseenter", layer, pointer);
-        map.on("mouseleave", layer, defaultPointer);
-      });
-      setMapReady(true);
-    });
-    map.on("error", (event: { error?: Error }) => {
-      if (!map.loaded()) {
-        setMapError(event.error?.message || "Não foi possível carregar o mapa vetorial.");
+    let disposed = false;
+    let resizeObserver: ResizeObserver | null = null;
+    const startupTimeout = window.setTimeout(() => {
+      if (!readyRef.current && !disposed) {
+        setStatus("degraded");
+        setStatusMessage("O motor demorou mais que o esperado. O modo seguro foi ativado.");
       }
-    });
+    }, 6_000);
+
+    try {
+      const map = new maplibregl.Map({
+        container: containerRef.current,
+        style: localStyle,
+        center: mapCenter,
+        zoom: 11.2,
+        attributionControl: false,
+        maxPitch: 65,
+        pitchWithRotate: true,
+        dragRotate: true,
+      });
+      mapRef.current = map;
+      map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+      map.addControl(new maplibregl.FullscreenControl(), "top-right");
+      map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "metric" }), "bottom-left");
+      map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
+
+      const selectParcel = (event: MapLayerMouseEvent) => {
+        const feature = event.features?.[0];
+        const farmId = feature?.properties?.farmId as Exclude<FarmScope, "all"> | undefined;
+        const parcelId = String(feature?.properties?.parcelId || "");
+        if (farmId && parcelId) callbackRef.current.onSelectParcel(farmId, parcelId);
+      };
+      const selectDischarge = (event: MapLayerMouseEvent) => {
+        const depositId = String(event.features?.[0]?.properties?.depositId || "");
+        if (depositId) callbackRef.current.onSelectDeposit(depositId);
+      };
+      const expandCluster = async (event: MapLayerMouseEvent) => {
+        const feature = event.features?.[0];
+        const clusterId = Number(feature?.properties?.cluster_id);
+        const source = map.getSource(sourceIds.discharges) as GeoJSONSource | undefined;
+        if (!source || !Number.isFinite(clusterId) || feature?.geometry?.type !== "Point") return;
+        const zoom = await source.getClusterExpansionZoom(clusterId);
+        map.easeTo({ center: feature.geometry.coordinates as Coordinate, zoom });
+      };
+      const pointer = () => {
+        map.getCanvas().style.cursor = "pointer";
+      };
+      const defaultPointer = () => {
+        map.getCanvas().style.cursor = "";
+      };
+
+      map.once("load", () => {
+        if (disposed) return;
+        const [parcels, markers] = latestDataRef.current;
+        addOperationalLayers(map, parcels, markers, showHeat, show3d);
+        setBasemap(map, basemapMode);
+        fitMapToData(map, [parcels, markers], false);
+
+        map.on("click", operationalLayerIds.fill, selectParcel);
+        map.on("click", operationalLayerIds.points, selectDischarge);
+        map.on("click", operationalLayerIds.clusters, expandCluster);
+        [operationalLayerIds.fill, operationalLayerIds.points, operationalLayerIds.clusters].forEach((layer) => {
+          map.on("mouseenter", layer, pointer);
+          map.on("mouseleave", layer, defaultPointer);
+        });
+
+        readyRef.current = true;
+        window.clearTimeout(startupTimeout);
+        setStatus("ready");
+        setStatusMessage("Mapa operacional");
+      });
+
+      map.on("error", (event: { error?: Error }) => {
+        if (!readyRef.current) {
+          setStatus("degraded");
+          setStatusMessage(event.error?.message || "Falha ao iniciar a visualização geoespacial.");
+        }
+      });
+
+      resizeObserver = new ResizeObserver(() => map.resize());
+      resizeObserver.observe(containerRef.current);
+    } catch (error) {
+      window.clearTimeout(startupTimeout);
+      setStatus("unsupported");
+      setStatusMessage(error instanceof Error ? error.message : "Não foi possível iniciar o mapa.");
+    }
 
     return () => {
-      map.remove();
+      disposed = true;
+      window.clearTimeout(startupTimeout);
+      resizeObserver?.disconnect();
+      mapRef.current?.remove();
       mapRef.current = null;
+      readyRef.current = false;
     };
   }, []);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapReady) return;
-    const parcels = map.getSource("vna-parcels") as GeoJSONSource | undefined;
-    const markers = map.getSource("vna-discharges") as GeoJSONSource | undefined;
+    if (!map || !readyRef.current) return;
+    const parcels = map.getSource(sourceIds.parcels) as GeoJSONSource | undefined;
+    const markers = map.getSource(sourceIds.discharges) as GeoJSONSource | undefined;
     parcels?.setData(parcelData as never);
     markers?.setData(markerData as never);
     fitMapToData(map, [parcelData, markerData]);
-  }, [farmScope, mapReady, markerData, parcelData]);
+  }, [farmScope, markerData, parcelData]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !readyRef.current) return;
+    try {
+      setBasemap(map, basemapMode);
+      setStatus("ready");
+      setStatusMessage(basemapMode === "clean" ? "Mapa operacional · modo leve" : "Mapa operacional");
+    } catch {
+      setStatus("degraded");
+      setStatusMessage("A imagem de fundo falhou; os dados operacionais continuam disponíveis.");
+    }
+  }, [basemapMode]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !readyRef.current || !map.getLayer(operationalLayerIds.heat)) return;
+    map.setLayoutProperty(operationalLayerIds.heat, "visibility", showHeat ? "visible" : "none");
+  }, [showHeat]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !readyRef.current || !map.getLayer(operationalLayerIds.extrusion)) return;
+    map.setLayoutProperty(operationalLayerIds.extrusion, "visibility", show3d ? "visible" : "none");
+    map.easeTo({
+      pitch: show3d ? 44 : 0,
+      bearing: show3d ? -14 : 0,
+      duration: 700,
+    });
+  }, [show3d]);
+
+  const retryMap = () => window.location.reload();
 
   return (
-    <div className="operations-map-shell">
-      <div className="operations-map-canvas" ref={containerRef} aria-label="Mapa operacional dos descarregos" />
+    <div className="operations-map-shell" data-map-status={status}>
+      <div
+        className="operations-map-canvas"
+        ref={containerRef}
+        aria-label="Mapa operacional dos descarregos"
+      />
 
-      {!mapReady && !mapError ? (
+      {status === "starting" ? (
         <div className="operations-map-loading" role="status">
-          <Satellite aria-hidden="true" />
-          <span>Carregando mapa vetorial</span>
+          <span className="operations-map-loading-mark"><Satellite aria-hidden="true" /></span>
+          <strong>Inicializando mapa operacional</strong>
+          <span>Parcelas e pontos GPS serão exibidos mesmo sem imagem de satélite.</span>
         </div>
       ) : null}
 
-      {mapError ? (
+      {status === "unsupported" ? (
         <div className="operations-map-error" role="alert">
           <WifiOff aria-hidden="true" />
-          <strong>Mapa temporariamente indisponível</strong>
-          <span>{mapError}</span>
+          <strong>Visualização 3D indisponível</strong>
+          <span>{statusMessage}</span>
+          <button type="button" onClick={retryMap}>Tentar novamente</button>
         </div>
       ) : null}
 
-      <div className="operations-map-tech">
-        <Satellite aria-hidden="true" />
-        <span>MapLibre · GeoJSON · tiles vetoriais</span>
+      <div className={`operations-map-status is-${status}`} aria-live="polite">
+        <span />
+        <strong>{statusMessage}</strong>
+        <em>{gpsCount} pontos GPS · {parcelData.features.length} parcelas</em>
+      </div>
+
+      <div className="operations-map-mode-switch" aria-label="Escolher visual do mapa">
+        <button
+          type="button"
+          className={basemapMode === "satellite" ? "is-active" : ""}
+          onClick={() => setBasemapMode("satellite")}
+          aria-pressed={basemapMode === "satellite"}
+        >
+          <Satellite aria-hidden="true" />
+          Satélite
+        </button>
+        <button
+          type="button"
+          className={basemapMode === "street" ? "is-active" : ""}
+          onClick={() => setBasemapMode("street")}
+          aria-pressed={basemapMode === "street"}
+        >
+          <MapIcon aria-hidden="true" />
+          Ruas
+        </button>
+        <button
+          type="button"
+          className={basemapMode === "clean" ? "is-active" : ""}
+          onClick={() => setBasemapMode("clean")}
+          aria-pressed={basemapMode === "clean"}
+        >
+          <Sparkles aria-hidden="true" />
+          Limpo
+        </button>
+      </div>
+
+      <div className="operations-map-tools" aria-label="Ferramentas do mapa">
+        <button
+          type="button"
+          className={showHeat ? "is-active" : ""}
+          onClick={() => setShowHeat((current) => !current)}
+          aria-pressed={showHeat}
+          title="Mapa de calor dos descarregos"
+        >
+          <Flame aria-hidden="true" />
+          <span>Calor</span>
+        </button>
+        <button
+          type="button"
+          className={show3d ? "is-active" : ""}
+          onClick={() => setShow3d((current) => !current)}
+          aria-pressed={show3d}
+          title="Volume por parcela em 3D"
+        >
+          <Box aria-hidden="true" />
+          <span>3D</span>
+        </button>
       </div>
 
       <div className="operations-map-legend" aria-label="Legenda do mapa">
@@ -478,6 +745,11 @@ export function OperationsMap({
           <Crosshair aria-hidden="true" />
         </button>
       ) : null}
+
+      <div className="operations-map-signature">
+        <Satellite aria-hidden="true" />
+        <span>MapLibre GL · mapa resiliente</span>
+      </div>
     </div>
   );
 }
