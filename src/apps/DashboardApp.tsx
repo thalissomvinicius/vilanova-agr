@@ -2,7 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, BarChart3, LogOut, Menu, UserRound, X } from "lucide-react";
 import { Dashboard } from "../components/Dashboard";
 import { Login } from "../components/Login";
-import { logoutDashboardUser, refreshDashboardSession, type DashboardUser } from "../lib/auth";
+import {
+  isDashboardSessionError,
+  logoutDashboardUser,
+  refreshDashboardSession,
+  type DashboardUser,
+} from "../lib/auth";
 import { loadRemoteDashboardData } from "../lib/remoteData";
 import { deleteFieldDeposit, reviewFieldDeposit, updateFieldDeposit } from "../lib/review";
 import type { FieldDeposit, FieldDepositEditValues, ReviewStatus, ScaleTicket } from "../types";
@@ -35,6 +40,17 @@ export function DashboardApp() {
       setLoadError("");
       setLastUpdatedAt(new Date());
     } catch (error) {
+      if (isDashboardSessionError(error)) {
+        await logoutDashboardUser(profile);
+        setUser(null);
+        setDeposits([]);
+        setScaleTickets([]);
+        setLoadError("");
+        setDataMode("Sessao encerrada");
+        setLastUpdatedAt(null);
+        return;
+      }
+
       setLoadError(error instanceof Error ? error.message : "Falha ao carregar os dados do Supabase.");
       setDataMode("Falha de conexao");
     } finally {

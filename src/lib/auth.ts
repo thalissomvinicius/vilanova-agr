@@ -179,7 +179,13 @@ export async function refreshDashboardSession() {
       });
       if (error) throw error;
 
-      const profile = normalizeProfile(firstRpcRow(data), saved.matricula, "rpc");
+      const row = firstRpcRow(data);
+      if (!row || typeof row !== "object") {
+        throw new Error("Sessao expirada ou invalida.");
+      }
+
+      const profile = normalizeProfile(row, "", "rpc");
+      if (!profile.matricula) throw new Error("Sessao expirada ou invalida.");
       const refreshed = { ...profile, sessionToken: saved.sessionToken };
       saveProfile(refreshed);
       return refreshed;
@@ -202,6 +208,20 @@ export async function logoutDashboardUser(profile?: DashboardUser | null) {
   }
 
   saveProfile(null);
+}
+
+export function isDashboardSessionError(error: unknown) {
+  const message = String((error as { message?: string } | null)?.message || error || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  return (
+    message.includes("sessao expirada") ||
+    message.includes("sessao invalida") ||
+    message.includes("session expired") ||
+    message.includes("invalid session")
+  );
 }
 
 export function dashboardErrorMessage(error: unknown, fallback = "Não foi possível concluir a operação agora.") {
