@@ -16,20 +16,23 @@ test("login, navegacao e layout responsivo do dashboard", async ({ page }) => {
     await expect(page.getByRole("tab", { name: tab })).toHaveAttribute("aria-selected", "true");
   }
 
-  await expect(page.locator(".operations-map-status strong")).toHaveText(/Mapa operacional/);
   await expect(page.locator(".operations-map-loading")).toBeHidden({ timeout: 30_000 });
+  await expect(page.locator(".operations-map-status strong")).toHaveText(/Mapa operacional/);
   await expect(page.locator(".maplibregl-canvas")).toBeVisible();
   await expect(page.locator(".operations-map-error")).toHaveCount(0);
   await expect(page.locator(".operations-map-shell")).toHaveAttribute("data-map-status", "ready");
+  await expect(page.locator(".operations-map-shell")).toHaveAttribute("data-visible-farms", "2");
   await expect(page.getByRole("button", { name: "Limpo", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Ruas", exact: true }).click();
   await expect(page.getByRole("button", { name: "Ruas", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Fé em Deus", exact: true }).click();
   await expect(page.locator(".operations-map-shell")).toHaveAttribute("data-farm-scope", "fe-em-deus");
   await expect(page.locator(".operations-map-shell")).toHaveAttribute("data-visible-parcels", "35");
+  await expect(page.locator(".operations-map-shell")).toHaveAttribute("data-visible-farms", "1");
   await page.getByRole("button", { name: "Vila Nova", exact: true }).click();
   await expect(page.locator(".operations-map-shell")).toHaveAttribute("data-farm-scope", "vila-nova");
   await expect(page.locator(".operations-map-shell")).toHaveAttribute("data-visible-parcels", "83");
+  await expect(page.locator(".operations-map-shell")).toHaveAttribute("data-visible-farms", "1");
 
   await page.getByRole("tab", { name: "Coletas" }).click();
   await expect(page.getByLabel("Ordenar coletas")).toBeVisible();

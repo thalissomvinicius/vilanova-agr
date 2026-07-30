@@ -19,6 +19,7 @@ import {
   Sparkles,
   WifiOff,
 } from "lucide-react";
+import farmBoundariesGeoJson from "../data/farm-boundaries.json";
 import farmParcelsGeoJson from "../data/farm-parcels.json";
 import type { FieldDeposit } from "../types";
 
@@ -53,16 +54,20 @@ interface OperationsMapProps {
 
 const mapCenter: Coordinate = [-48.22, -2.86];
 const sourceIds = {
+  boundaries: "vna-farm-boundaries",
   parcels: "vna-parcels",
   discharges: "vna-discharges",
   basemap: "vna-basemap",
 };
 const operationalLayerIds = {
   heat: "vna-discharge-heat",
+  boundaryFill: "vna-farm-boundaries-fill",
   extrusion: "vna-parcels-extrusion",
   fill: "vna-parcels-fill",
   outlineGlow: "vna-parcels-outline-glow",
   outline: "vna-parcels-outline",
+  boundaryHalo: "vna-farm-boundaries-halo",
+  boundaryLine: "vna-farm-boundaries-line",
   clusters: "vna-discharge-clusters",
   clusterCount: "vna-discharge-cluster-count",
   pointsHalo: "vna-discharges-points-halo",
@@ -115,10 +120,13 @@ maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
 const operationalLayerOrder = [
   operationalLayerIds.heat,
+  operationalLayerIds.boundaryFill,
   operationalLayerIds.extrusion,
   operationalLayerIds.fill,
   operationalLayerIds.outlineGlow,
   operationalLayerIds.outline,
+  operationalLayerIds.boundaryHalo,
+  operationalLayerIds.boundaryLine,
   operationalLayerIds.clusters,
   operationalLayerIds.clusterCount,
   operationalLayerIds.pointsHalo,
@@ -242,10 +250,13 @@ function setParcelFarmFilter(map: MapLibreMap, farmScope: FarmScope) {
     : ["==", ["get", "farmId"], farmScope] as never;
 
   [
+    operationalLayerIds.boundaryFill,
     operationalLayerIds.extrusion,
     operationalLayerIds.fill,
     operationalLayerIds.outlineGlow,
     operationalLayerIds.outline,
+    operationalLayerIds.boundaryHalo,
+    operationalLayerIds.boundaryLine,
   ].forEach((layerId) => {
     if (map.getLayer(layerId)) map.setFilter(layerId, filter);
   });
@@ -253,11 +264,16 @@ function setParcelFarmFilter(map: MapLibreMap, farmScope: FarmScope) {
 
 function addOperationalLayers(
   map: MapLibreMap,
+  boundaries: MapFeatureCollection,
   parcels: MapFeatureCollection,
   markers: MapFeatureCollection,
   showHeat: boolean,
   show3d: boolean,
 ) {
+  map.addSource(sourceIds.boundaries, {
+    type: "geojson",
+    data: boundaries as never,
+  });
   map.addSource(sourceIds.parcels, {
     type: "geojson",
     data: parcels as never,
@@ -291,6 +307,19 @@ function addOperationalLayers(
       ],
       "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 9, 15, 15, 30],
       "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 13, 0.85, 16, 0.1],
+    },
+  });
+  map.addLayer({
+    id: operationalLayerIds.boundaryFill,
+    type: "fill",
+    source: sourceIds.boundaries,
+    paint: {
+      "fill-color": [
+        "case",
+        ["==", ["get", "farmId"], "vila-nova"], "#2a8054",
+        "#347ca2",
+      ],
+      "fill-opacity": 0.1,
     },
   });
   map.addLayer({
@@ -369,6 +398,31 @@ function addOperationalLayers(
         1.5,
       ],
       "line-opacity": 0.95,
+    },
+  });
+  map.addLayer({
+    id: operationalLayerIds.boundaryHalo,
+    type: "line",
+    source: sourceIds.boundaries,
+    paint: {
+      "line-color": "rgba(255,255,255,0.96)",
+      "line-width": ["interpolate", ["linear"], ["zoom"], 9, 4, 15, 8],
+      "line-opacity": 0.92,
+      "line-blur": 0.55,
+    },
+  });
+  map.addLayer({
+    id: operationalLayerIds.boundaryLine,
+    type: "line",
+    source: sourceIds.boundaries,
+    paint: {
+      "line-color": [
+        "case",
+        ["==", ["get", "farmId"], "vila-nova"], "#db8f12",
+        "#256c94",
+      ],
+      "line-width": ["interpolate", ["linear"], ["zoom"], 9, 2.4, 15, 4.5],
+      "line-opacity": 1,
     },
   });
   map.addLayer({
@@ -457,6 +511,8 @@ export function OperationsMap({
   const callbackRef = useRef({ onSelectDeposit, onSelectParcel });
   const latestMapFrameRef = useRef(0);
   const latestDataRef = useRef<{
+    boundaries: MapFeatureCollection;
+    visibleBoundaries: MapFeatureCollection;
     parcels: MapFeatureCollection;
     visibleParcels: MapFeatureCollection;
     markers: MapFeatureCollection;
@@ -470,6 +526,23 @@ export function OperationsMap({
   const [show3d, setShow3d] = useState(false);
 
   callbackRef.current = { onSelectDeposit, onSelectParcel };
+
+  const boundaryData = useMemo<MapFeatureCollection>(() => {
+    const source = farmBoundariesGeoJson as unknown as MapFeatureCollection;
+    return {
+      type: "FeatureCollection",
+      features: source.features.filter(
+        (feature) => ["vila-nova", "fe-em-deus"].includes(String(feature.properties.farmId || "")),
+      ),
+    };
+  }, []);
+
+  const visibleBoundaryData = useMemo<MapFeatureCollection>(() => ({
+    type: "FeatureCollection",
+    features: boundaryData.features.filter(
+      (feature) => farmScope === "all" || feature.properties.farmId === farmScope,
+    ),
+  }), [boundaryData, farmScope]);
 
   const parcelData = useMemo<MapFeatureCollection>(() => {
     const depositCountByParcel = new Map<string, number>();
@@ -542,6 +615,8 @@ export function OperationsMap({
   }), [deposits, farmScope, selectedDepositId]);
 
   latestDataRef.current = {
+    boundaries: boundaryData,
+    visibleBoundaries: visibleBoundaryData,
     parcels: parcelData,
     visibleParcels: visibleParcelData,
     markers: markerData,
@@ -554,6 +629,7 @@ export function OperationsMap({
   );
   const gpsCount = markerData.features.length;
   const visibleParcelCount = visibleParcelData.features.length;
+  const visibleFarmCount = visibleBoundaryData.features.length;
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return undefined;
@@ -618,10 +694,21 @@ export function OperationsMap({
         if (disposed) return;
         const currentData = latestDataRef.current;
         if (!currentData) return;
-        addOperationalLayers(map, currentData.parcels, currentData.markers, showHeat, show3d);
+        addOperationalLayers(
+          map,
+          currentData.boundaries,
+          currentData.parcels,
+          currentData.markers,
+          showHeat,
+          show3d,
+        );
         setParcelFarmFilter(map, currentData.farmScope);
         setBasemap(map, basemapMode);
-        fitMapToData(map, [currentData.visibleParcels, currentData.markers], false);
+        fitMapToData(
+          map,
+          [currentData.visibleBoundaries, currentData.visibleParcels, currentData.markers],
+          false,
+        );
 
         map.on("click", operationalLayerIds.fill, selectParcel);
         map.on("click", operationalLayerIds.points, selectDischarge);
@@ -665,8 +752,10 @@ export function OperationsMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !readyRef.current) return;
+    const boundaries = map.getSource(sourceIds.boundaries) as GeoJSONSource | undefined;
     const parcels = map.getSource(sourceIds.parcels) as GeoJSONSource | undefined;
     const markers = map.getSource(sourceIds.discharges) as GeoJSONSource | undefined;
+    boundaries?.setData(boundaryData as never);
     parcels?.setData(parcelData as never);
     markers?.setData(markerData as never);
     setParcelFarmFilter(map, farmScope);
@@ -677,7 +766,7 @@ export function OperationsMap({
     const firstFrame = window.requestAnimationFrame(() => {
       const secondFrame = window.requestAnimationFrame(() => {
         map.resize();
-        fitMapToData(map, [visibleParcelData, markerData]);
+        fitMapToData(map, [visibleBoundaryData, visibleParcelData, markerData]);
         raiseOperationalLayers(map);
         map.triggerRepaint();
       });
@@ -688,7 +777,7 @@ export function OperationsMap({
     return () => {
       window.cancelAnimationFrame(latestMapFrameRef.current);
     };
-  }, [farmScope, markerData, parcelData, visibleParcelData]);
+  }, [boundaryData, farmScope, markerData, parcelData, visibleBoundaryData, visibleParcelData]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -728,6 +817,7 @@ export function OperationsMap({
       data-map-status={status}
       data-farm-scope={farmScope}
       data-visible-parcels={visibleParcelCount}
+      data-visible-farms={visibleFarmCount}
     >
       <div
         className="operations-map-canvas"
@@ -755,7 +845,7 @@ export function OperationsMap({
       <div className={`operations-map-status is-${status}`} aria-live="polite">
         <span />
         <strong>{statusMessage}</strong>
-        <em>{gpsCount} pontos GPS · {visibleParcelCount} parcelas</em>
+        <em>{gpsCount} pontos GPS · {visibleParcelCount} parcelas · limites oficiais</em>
       </div>
 
       <div className="operations-map-mode-switch" aria-label="Escolher visual do mapa">

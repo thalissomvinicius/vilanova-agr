@@ -67,6 +67,20 @@ O dashboard usa somente matricula/senha via RPC `dashboard_authenticate`, como o
 dashboard CQO. Leituras e alteracoes passam por RPCs com token de sessao; o
 navegador nao recebe permissao direta nas tabelas operacionais.
 
+## Atualizar os shapes oficiais
+
+O mapa usa os GeoJSON gerados em `src/data/farm-parcels.json` e
+`src/data/farm-boundaries.json`. Para importar uma nova versão dos shapefiles:
+
+```bash
+py scripts/import_farm_shapes.py \
+  --source-dir "E:\TÉCNICA\Geo\2-shp\Shapes Fazendas - VNA" \
+  --output-dir src/data
+```
+
+O importador corrige a codificação do DBF, reprojeta os limites de
+SIRGAS 2000 / UTM 22S para WGS84 e valida as contagens por fazenda.
+
 ## Fluxo operacional
 
 1. Motorista passa na balanca de saida.
