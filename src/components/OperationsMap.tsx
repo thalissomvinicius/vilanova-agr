@@ -68,6 +68,7 @@ const operationalLayerIds = {
   outline: "vna-parcels-outline",
   boundaryHalo: "vna-farm-boundaries-halo",
   boundaryLine: "vna-farm-boundaries-line",
+  parcelLabels: "vna-parcels-labels",
   clusters: "vna-discharge-clusters",
   clusterCount: "vna-discharge-cluster-count",
   pointsHalo: "vna-discharges-points-halo",
@@ -127,6 +128,7 @@ const operationalLayerOrder = [
   operationalLayerIds.outline,
   operationalLayerIds.boundaryHalo,
   operationalLayerIds.boundaryLine,
+  operationalLayerIds.parcelLabels,
   operationalLayerIds.clusters,
   operationalLayerIds.clusterCount,
   operationalLayerIds.pointsHalo,
@@ -150,6 +152,50 @@ function farmIdFromName(value: string): Exclude<FarmScope, "all"> | null {
 
 function normalizeParcel(value: unknown) {
   return normalizeText(value).replace(/[^A-Z0-9]/g, "");
+}
+
+function parcelLabelImageId(value: unknown) {
+  return `vna-parcel-label-${normalizeParcel(value).toLowerCase()}`;
+}
+
+function ensureParcelLabelImages(map: MapLibreMap, parcels: MapFeatureCollection) {
+  const labels = new Set(
+    parcels.features
+      .map((feature) => String(feature.properties.parcelLabel || "").trim())
+      .filter(Boolean),
+  );
+
+  labels.forEach((label) => {
+    const imageId = parcelLabelImageId(label);
+    if (map.hasImage(imageId)) return;
+
+    const pixelRatio = 2;
+    const logicalWidth = Math.max(31, 15 + label.length * 7);
+    const logicalHeight = 21;
+    const canvas = document.createElement("canvas");
+    canvas.width = logicalWidth * pixelRatio;
+    canvas.height = logicalHeight * pixelRatio;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+
+    context.scale(pixelRatio, pixelRatio);
+    context.beginPath();
+    context.roundRect(0.75, 0.75, logicalWidth - 1.5, logicalHeight - 1.5, 6);
+    context.fillStyle = "rgba(250, 252, 249, 0.82)";
+    context.fill();
+    context.strokeStyle = "rgba(16, 62, 42, 0.34)";
+    context.lineWidth = 0.75;
+    context.stroke();
+    context.fillStyle = "#153e2c";
+    context.font = "700 10px Arial, sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(label, logicalWidth / 2, logicalHeight / 2 + 0.25);
+
+    map.addImage(imageId, context.getImageData(0, 0, canvas.width, canvas.height), {
+      pixelRatio,
+    });
+  });
 }
 
 function hasGps(deposit: FieldDeposit) {
@@ -257,6 +303,7 @@ function setParcelFarmFilter(map: MapLibreMap, farmScope: FarmScope) {
     operationalLayerIds.outline,
     operationalLayerIds.boundaryHalo,
     operationalLayerIds.boundaryLine,
+    operationalLayerIds.parcelLabels,
   ].forEach((layerId) => {
     if (map.getLayer(layerId)) map.setFilter(layerId, filter);
   });
@@ -285,6 +332,7 @@ function addOperationalLayers(
     clusterRadius: 44,
     clusterMaxZoom: 14,
   });
+  ensureParcelLabelImages(map, parcels);
 
   map.addLayer({
     id: operationalLayerIds.heat,
@@ -427,6 +475,28 @@ function addOperationalLayers(
       ],
       "line-width": ["interpolate", ["linear"], ["zoom"], 9, 0.9, 15, 1.5],
       "line-opacity": 0.92,
+    },
+  });
+  map.addLayer({
+    id: operationalLayerIds.parcelLabels,
+    type: "symbol",
+    source: sourceIds.parcels,
+    minzoom: 10.4,
+    layout: {
+      "symbol-placement": "point",
+      "icon-image": ["get", "labelImage"],
+      "icon-size": ["interpolate", ["linear"], ["zoom"], 10.4, 0.72, 13, 0.88, 16, 1],
+      "icon-padding": 3,
+      "icon-allow-overlap": false,
+      "icon-ignore-placement": false,
+      "symbol-sort-key": [
+        "case",
+        ["boolean", ["get", "selected"], false], 0,
+        1,
+      ],
+    },
+    paint: {
+      "icon-opacity": ["interpolate", ["linear"], ["zoom"], 10.4, 0.72, 12, 0.9],
     },
   });
   map.addLayer({
@@ -574,6 +644,7 @@ export function OperationsMap({
             properties: {
               ...feature.properties,
               parcelLabel,
+              labelImage: parcelLabelImageId(parcelLabel),
               depositCount: depositCountByParcel.get(`${farmId}:${normalizeParcel(parcelLabel)}`) || 0,
               selected: parcelId === selectedParcelId,
             },
