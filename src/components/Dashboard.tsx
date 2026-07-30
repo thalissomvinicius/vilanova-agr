@@ -3,6 +3,8 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
+  lazy,
+  Suspense,
   useEffect,
   useMemo,
   useRef,
@@ -23,8 +25,11 @@ import {
 } from "recharts";
 import {
   AlertTriangle,
+  ArrowUpDown,
   BarChart3,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   ClipboardCheck,
   ClipboardList,
   Clock3,
@@ -42,6 +47,7 @@ import {
   Save,
   Search,
   Scale,
+  Rows3,
   TicketCheck,
   Trash2,
   Truck,
@@ -55,6 +61,10 @@ import { formatDate, formatMinutes, formatTonnes } from "../lib/format";
 import { findFleetVehicleByPlate } from "../lib/fleet";
 import farmParcelsGeoJson from "../data/farm-parcels.json";
 import type { DashboardSummary, FieldDeposit, FieldDepositEditValues, ReviewStatus, ScaleTicket, SyncStatus } from "../types";
+
+const OperationsMap = lazy(() => (
+  import("./OperationsMap").then((module) => ({ default: module.OperationsMap }))
+));
 
 interface DashboardProps {
   deposits: FieldDeposit[];
@@ -77,6 +87,17 @@ const dashboardViewOrder: DashboardView[] = ["geral", "coletas", "conciliacao", 
 type TicketStatusFilter = "all" | "matched" | "pending";
 type SyncStatusFilter = "all" | SyncStatus;
 type AnalysisFarmFilter = FarmId | "all";
+type CollectionSortKey =
+  | "date"
+  | "ticket"
+  | "vehicle"
+  | "driver"
+  | "farm"
+  | "subproduct"
+  | "weight"
+  | "review";
+type SortDirection = "asc" | "desc";
+type TableDensity = "comfortable" | "compact";
 
 interface Filters {
   search: string;
@@ -1536,6 +1557,13 @@ export function Dashboard({
   const [editDepositId, setEditDepositId] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<FieldDepositEditValues | null>(null);
   const [editError, setEditError] = useState("");
+  const [collectionSort, setCollectionSort] = useState<{
+    key: CollectionSortKey;
+    direction: SortDirection;
+  }>({ key: "date", direction: "desc" });
+  const [collectionPage, setCollectionPage] = useState(1);
+  const [collectionPageSize, setCollectionPageSize] = useState(25);
+  const [tableDensity, setTableDensity] = useState<TableDensity>("comfortable");
   const editModalRef = useRef<HTMLFormElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
@@ -1548,6 +1576,49 @@ export function Dashboard({
     () => filterDeposits(scopedDeposits, ticketMaps, filters),
     [scopedDeposits, filters, ticketMaps],
   );
+  const sortedCollectionDeposits = useMemo(() => {
+    const direction = collectionSort.direction === "asc" ? 1 : -1;
+    const valueFor = (deposit: FieldDeposit) => {
+      const ticket = getTicketForDeposit(deposit, ticketMaps);
+      switch (collectionSort.key) {
+        case "ticket":
+          return ticket?.ticketCode || deposit.scaleTicketCode || "";
+        case "vehicle":
+          return deposit.vehiclePlate;
+        case "driver":
+          return deposit.driverName || deposit.driverRegistration;
+        case "farm":
+          return deposit.farm;
+        case "subproduct":
+          return deposit.subproduct;
+        case "weight":
+          return ticket?.netWeightKg || 0;
+        case "review":
+          return getReviewStatus(deposit);
+        case "date":
+        default:
+          return `${deposit.depositDate}T${deposit.depositTime}`;
+      }
+    };
+
+    return [...filteredDeposits].sort((left, right) => {
+      const leftValue = valueFor(left);
+      const rightValue = valueFor(right);
+      if (typeof leftValue === "number" && typeof rightValue === "number") {
+        return (leftValue - rightValue) * direction;
+      }
+      return String(leftValue).localeCompare(String(rightValue), "pt-BR", {
+        numeric: true,
+        sensitivity: "base",
+      }) * direction;
+    });
+  }, [collectionSort, filteredDeposits, ticketMaps]);
+  const collectionPageCount = Math.max(1, Math.ceil(sortedCollectionDeposits.length / collectionPageSize));
+  const visibleCollectionDeposits = useMemo(() => {
+    const safePage = Math.min(collectionPage, collectionPageCount);
+    const start = (safePage - 1) * collectionPageSize;
+    return sortedCollectionDeposits.slice(start, start + collectionPageSize);
+  }, [collectionPage, collectionPageCount, collectionPageSize, sortedCollectionDeposits]);
   const matchedTickets = useMemo(
     () => getMatchedTickets(filteredDeposits, ticketMaps),
     [filteredDeposits, ticketMaps],
@@ -1779,6 +1850,37 @@ export function Dashboard({
     ? totalMapBetweenPlots
     : activeFarmMap?.betweenDeposits ?? 0;
   const isDraggingCombinedMap = Boolean(draggingMap && draggingMap.farmId === activeFarmMapId);
+
+  useEffect(() => {
+    setCollectionPage(1);
+  }, [collectionPageSize, collectionSort, filters]);
+
+  useEffect(() => {
+    setCollectionPage((current) => Math.min(current, collectionPageCount));
+  }, [collectionPageCount]);
+
+  const toggleCollectionSort = (key: CollectionSortKey) => {
+    setCollectionSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
+    }));
+  };
+
+  const collectionSortButton = (label: string, key: CollectionSortKey) => (
+    <button
+      type="button"
+      className={`table-sort-button ${collectionSort.key === key ? "active" : ""}`}
+      onClick={() => toggleCollectionSort(key)}
+      aria-label={`Ordenar por ${label}`}
+      aria-pressed={collectionSort.key === key}
+    >
+      <span>{label}</span>
+      <ArrowUpDown
+        aria-hidden="true"
+        className={collectionSort.key === key ? collectionSort.direction : ""}
+      />
+    </button>
+  );
 
   const updateFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters((current) => ({
@@ -2050,6 +2152,12 @@ export function Dashboard({
     });
     setSelectedFarmId(farm.id);
     setSelectedDriverKey(null);
+  };
+
+  const selectMapParcel = (farmId: FarmId, parcelId: string) => {
+    const farmMap = farmMapData.find((item) => item.farm.id === farmId);
+    const parcel = farmMap?.parcels.find((item) => item.id === parcelId);
+    if (farmMap && parcel) selectParcelForAnalysis(farmMap.farm, parcel);
   };
 
   const selectParcelRankItem = (item: ParcelRankItem) => {
@@ -2909,35 +3017,82 @@ export function Dashboard({
             </article>
           </div>
 
-          <article className="table-panel collection-table-panel">
+          <article className={`table-panel collection-table-panel table-density-${tableDensity}`}>
             <header>
               <div>
                 <h2>Coletas de campo</h2>
-                <span className="table-caption">Registros recebidos do app, com validação para liberar a análise</span>
+                <span className="table-caption">
+                  {filteredDeposits.length} registros recebidos do app · ordenação e paginação local
+                </span>
+              </div>
+              <div className="table-view-controls" aria-label="Controles da tabela">
+                <label>
+                  <span>Ordenar</span>
+                  <select
+                    aria-label="Ordenar coletas"
+                    value={`${collectionSort.key}:${collectionSort.direction}`}
+                    onChange={(event) => {
+                      const [key, direction] = event.target.value.split(":") as [
+                        CollectionSortKey,
+                        SortDirection,
+                      ];
+                      setCollectionSort({ key, direction });
+                    }}
+                  >
+                    <option value="date:desc">Mais recentes</option>
+                    <option value="date:asc">Mais antigas</option>
+                    <option value="ticket:asc">Ticket</option>
+                    <option value="driver:asc">Motorista</option>
+                    <option value="weight:desc">Maior peso</option>
+                    <option value="review:asc">Validação</option>
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className={tableDensity === "compact" ? "active" : ""}
+                  onClick={() => setTableDensity((current) => (
+                    current === "compact" ? "comfortable" : "compact"
+                  ))}
+                  title="Alternar densidade da tabela"
+                >
+                  <Rows3 aria-hidden="true" />
+                  {tableDensity === "compact" ? "Compacta" : "Confortável"}
+                </button>
+                <label>
+                  <span>Linhas</span>
+                  <select
+                    value={collectionPageSize}
+                    onChange={(event) => setCollectionPageSize(Number(event.target.value))}
+                  >
+                    <option value={10}>10</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                  </select>
+                </label>
               </div>
             </header>
             <div className="table-scroll">
               <table className="responsive-data-table">
                 <thead>
                   <tr>
-                    <th scope="col">Data</th>
-                    <th scope="col">Ticket</th>
-                    <th scope="col">Veiculo</th>
-                    <th scope="col">Motorista</th>
+                    <th scope="col">{collectionSortButton("Data", "date")}</th>
+                    <th scope="col">{collectionSortButton("Ticket", "ticket")}</th>
+                    <th scope="col">{collectionSortButton("Veículo", "vehicle")}</th>
+                    <th scope="col">{collectionSortButton("Motorista", "driver")}</th>
                     <th scope="col">Origem</th>
-                    <th scope="col">Fazenda</th>
+                    <th scope="col">{collectionSortButton("Fazenda", "farm")}</th>
                     <th scope="col">Parcelas</th>
-                    <th scope="col">Subproduto</th>
-                    <th scope="col">Balanca</th>
+                    <th scope="col">{collectionSortButton("Subproduto", "subproduct")}</th>
+                    <th scope="col">{collectionSortButton("Balança", "weight")}</th>
                     <th scope="col">GPS</th>
-                    <th scope="col">Validação</th>
+                    <th scope="col">{collectionSortButton("Validação", "review")}</th>
                     <th scope="col">Sync</th>
                     <th scope="col">Detalhe</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredDeposits.length > 0 ? (
-                    filteredDeposits.map((deposit) => {
+                    visibleCollectionDeposits.map((deposit) => {
                       const ticket = getTicketForDeposit(deposit, ticketMaps);
                       const ticketCode = ticket?.ticketCode ?? deposit.scaleTicketCode;
 
@@ -3009,6 +3164,37 @@ export function Dashboard({
                 </tbody>
               </table>
             </div>
+            <footer className="table-pagination">
+              <span>
+                Exibindo{" "}
+                {sortedCollectionDeposits.length
+                  ? (Math.min(collectionPage, collectionPageCount) - 1) * collectionPageSize + 1
+                  : 0}
+                –{Math.min(collectionPage * collectionPageSize, sortedCollectionDeposits.length)} de{" "}
+                {sortedCollectionDeposits.length}
+              </span>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setCollectionPage((current) => Math.max(1, current - 1))}
+                  disabled={collectionPage <= 1}
+                  aria-label="Página anterior"
+                >
+                  <ChevronLeft aria-hidden="true" />
+                </button>
+                <strong>
+                  Página {Math.min(collectionPage, collectionPageCount)} de {collectionPageCount}
+                </strong>
+                <button
+                  type="button"
+                  onClick={() => setCollectionPage((current) => Math.min(collectionPageCount, current + 1))}
+                  disabled={collectionPage >= collectionPageCount}
+                  aria-label="Próxima página"
+                >
+                  <ChevronRight aria-hidden="true" />
+                </button>
+              </div>
+            </footer>
           </article>
         </section>
       ) : null}
@@ -3501,9 +3687,9 @@ export function Dashboard({
           <article className="chart-panel analysis-map-card">
             <header>
               <div>
-                <h2>Mapa CQO dos descarregos</h2>
+                <h2>Mapa operacional dos descarregos</h2>
                 <span className="chart-note">
-                  Shapes no mesmo mapa · {activeMapScopeLabel} · {activeMapParcels} parcelas e {activeMapMarkers} pontos GPS
+                  MapLibre + GeoJSON · {activeMapScopeLabel} · {activeMapParcels} parcelas e {activeMapMarkers} pontos GPS
                 </span>
               </div>
               <MapPinned aria-hidden="true" />
@@ -3527,7 +3713,34 @@ export function Dashboard({
                 </button>
               ))}
             </div>
-            <div className="geo-map-layout">
+            <Suspense
+              fallback={(
+                <div className="operations-map-suspense" role="status">
+                  Preparando tecnologia do mapa
+                </div>
+              )}
+            >
+              <OperationsMap
+                deposits={analysisDeposits}
+                farmScope={selectedFarmId}
+                selectedDepositId={selectedDepositId}
+                selectedParcelId={selectedParcel?.parcelId}
+                onSelectDeposit={(depositId) => {
+                  const deposit = analysisDeposits.find((item) => item.id === depositId);
+                  setSelectedDepositId(depositId);
+                  if (deposit) {
+                    setSelectedDriverKey(getDriverKey(deposit));
+                    const farmId = getFocusFarmId(deposit.farm);
+                    if (farmId) setSelectedFarmId(farmId);
+                  }
+                  setSelectedParcel(null);
+                }}
+                onSelectParcel={selectMapParcel}
+              />
+            </Suspense>
+            <details className="legacy-map-details">
+              <summary>Modo esquemático offline</summary>
+              <div className="geo-map-layout">
               <div className={`farm-map-panel farm-map-panel-combined ${activeMapMarkers === 0 ? "farm-map-panel-empty" : ""}`}>
                 <div className="farm-map-head">
                   <div className="farm-map-title-static">
@@ -3759,7 +3972,8 @@ export function Dashboard({
                   <span>{activeMapBetweenPlots} entre parcelas</span>
                 </div>
               </div>
-            </div>
+              </div>
+            </details>
           </article>
 
           <article className="chart-panel analysis-driver-card">

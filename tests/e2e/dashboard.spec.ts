@@ -15,6 +15,15 @@ test("login, navegacao e layout responsivo do dashboard", async ({ page }) => {
     await expect(page.getByRole("tab", { name: tab })).toHaveAttribute("aria-selected", "true");
   }
 
+  await expect(page.getByText("MapLibre · GeoJSON · tiles vetoriais")).toBeVisible();
+  await expect(page.locator(".operations-map-loading")).toBeHidden({ timeout: 30_000 });
+  await expect(page.locator(".maplibregl-canvas")).toBeVisible();
+  await expect(page.locator(".operations-map-error")).toHaveCount(0);
+
+  await page.getByRole("tab", { name: "Coletas" }).click();
+  await expect(page.getByLabel("Ordenar coletas")).toBeVisible();
+  await expect(page.getByLabel("Controles da tabela")).toBeVisible();
+
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(overflow).toBeLessThanOrEqual(1);
 });
